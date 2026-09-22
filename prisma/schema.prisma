@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  password     String
+  role         String   @default("Tenant") // "Owner", "Operator", "Tenant"
+  
+  namaLengkap  String?
+  nomorHp      String?
+  fotoProfil   String?  
+
+  createdAt    DateTime @default(now())
+
+  penghuni         Penghuni? 
+  persetujuanRoles PersetujuanRole[]
+}
+
+model Kamar {
+  id           Int           @id @default(autoincrement())
+  nomorKamar   String        @unique
+  tipe         String
+  harga        Float
+  status       String        @default("Tersedia") // "Tersedia", "Booking", "Terisi"
+  
+  penghuni     Penghuni?
+  invoices     Invoice[]
+  maintenances Maintenance[]
+  kontrakList  Kontrak[]     
+}
+
+model Penghuni {
+  id           Int      @id @default(autoincrement())
+  nama         String
+  nomorHp      String
+  tanggalMasuk DateTime @default(now())
+  
+  nik          String?  
+  fotoKtp      String?  
+  
+  userId       Int?     @unique
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Opsional agar bisa melakukan Soft Check-out (lepas dari kamar)
+  kamarId      Int?     @unique
+  kamar        Kamar?   @relation(fields: [kamarId], references: [id], onDelete: Restrict)
+
+  kontrak            Kontrak[]
+  persetujuanBerkas PersetujuanBerkas[]
+}
+
+model Kontrak {
+  id           Int      @id @default(autoincrement())
+  
+  kamarId      Int
+  kamar        Kamar    @relation(fields: [kamarId], references: [id], onDelete: Cascade)
+  
+  penghuniId   Int
+  penghuni     Penghuni @relation(fields: [penghuniId], references: [id], onDelete: Cascade)
+  
+  tanggalMulai DateTime
+  durasiBulan  Int
+  status       String   @default("Pending") // "Pending", "Aktif", "Selesai"
+  createdAt    DateTime @default(now())
+
+  invoices     Invoice[]
+}
+
+model Invoice {
+  id            Int       @id @default(autoincrement())
+  
+  kamarId       Int?
+  kamar         Kamar?    @relation(fields: [kamarId], references: [id], onDelete: SetNull)
+
+  kontrakId     Int?
+  kontrak       Kontrak?  @relation(fields: [kontrakId], references: [id], onDelete: SetNull)
+
+  jumlah        Float
+  jatuhTempo    DateTime
+  status        String    @default("Belum Lunas") // "Belum Lunas", "Menunggu Verifikasi", "Lunas"
+  tanggalBayar  DateTime? 
+  createdAt     DateTime  @default(now())
+
+  buktiBayarUrl String?   
+}
+
+model Maintenance {
+  id            Int      @id @default(autoincrement())
+  kamarId       Int
+  kamar         Kamar    @relation(fields: [kamarId], references: [id], onDelete: Cascade)
+  
+  kategori      String   @default("Lainnya") 
+  deskripsi     String   
+  fotoUrl       String?  
+  
+  status        String   @default("Pending") // "Pending", "Diproses", "Selesai", "Resolved"
+  createdAt     DateTime @default(now())
+
+  estimasiBiaya Float?   
+  
+  // STANDAR ENTERPRISE: 
+  // "Pengelola" (Beban Kas Kos) atau "Tenant" (Ditagihkan ke Penghuni jadi Invoice)
+  tanggungJawab String   @default("Pengelola") 
+}
+
+model Pengeluaran {
+  id          Int      @id @default(autoincrement())
+  kategori    String   // "Operasional", "Maintenance", "Prive Owner", "Lainnya"
+  jumlah      Float
+  keterangan  String?
+  tanggal     DateTime @default(now())
+  createdAt   DateTime @default(now())
+}
+
+model Pengumuman {
+  id          Int      @id @default(autoincrement())
+  judul       String
+  kategori    String   @default("Umum") // "Maintenance", "Keuangan", "Umum"
+  prioritas   String   @default("Informasi") // "Penting", "Informasi"
+  isi         String
+  createdAt   DateTime @default(now())
+}
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique 
+  value     String   
+  updatedAt DateTime @updatedAt
+}
+
+model PersetujuanRole {
+  id          Int      @id @default(autoincrement())
+  userId      Int      
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetRole  String   // "Owner", "Operator", "Tenant"
+  requestedBy Int      // ID Operator yang mengajukan
+  status      String   @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
+  createdAt   DateTime @default(now())
+}
+
+model PersetujuanBerkas {
+  id          Int      @id @default(autoincrement())
+  penghuniId  Int
+  penghuni    Penghuni @relation(fields: [penghuniId], references: [id], onDelete: Cascade)
+  fotoKtpBaru String   // URL file KTP baru yang diajukan
+  status      String   @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
+  createdAt   DateTime @default(now())
+}
