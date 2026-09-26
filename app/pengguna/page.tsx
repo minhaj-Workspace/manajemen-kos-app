@@ -4,11 +4,13 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 
-// Server Action untuk mengubah Role pengguna
+// ==========================================
+// SERVER ACTION (Enum Mutakhir: TENANT / OPERATOR)
+// ==========================================
 async function updateRoleAction(formData: FormData) {
   'use server'
   const userId = parseInt(formData.get('userId') as string, 10)
-  const newRole = formData.get('newRole') as string
+  const newRole = formData.get('newRole') as 'TENANT' | 'OPERATOR' | 'OWNER'
 
   if (!userId || !newRole) return
 
@@ -20,12 +22,15 @@ async function updateRoleAction(formData: FormData) {
   revalidatePath('/pengguna')
 }
 
+// ==========================================
+// KOMPONEN HALAMAN PENGGUNA
+// ==========================================
 export default async function PenggunaPage() {
-  // Proteksi Akses: Izinkan Operator maupun Owner (fleksibel & aman dari case-sensitivity)
   const cookieStore = await cookies()
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (userRole !== 'operator' && userRole !== 'owner') {
+  // Proteksi Akses dengan Enum Kapital
+  if (userRole !== 'OPERATOR' && userRole !== 'OWNER') {
     redirect('/')
   }
 
@@ -44,7 +49,7 @@ export default async function PenggunaPage() {
             👥 Manajemen Otoritas Pengguna
           </h1>
           <p style={{ color: '#a0aec0', margin: 0, fontSize: '14px' }}>
-            Kelola hak akses akun (Tenant / Operator / Owner) yang terdaftar di sistem.
+            Kelola hak akses akun (TENANT / OPERATOR / OWNER) yang terdaftar di sistem.
           </p>
         </div>
         
@@ -70,8 +75,8 @@ export default async function PenggunaPage() {
             </thead>
             <tbody>
               {daftarUser.map((user) => {
-                const isOperatorOrOwner = user.role.toLowerCase() === 'operator' || user.role.toLowerCase() === 'owner'
-                const targetRole = isOperatorOrOwner ? 'Tenant' : 'Operator'
+                const isOperatorOrOwner = user.role === 'OPERATOR' || user.role === 'OWNER'
+                const targetRole = isOperatorOrOwner ? 'TENANT' : 'OPERATOR'
 
                 return (
                   <tr key={user.id} style={{ borderBottom: '1px solid #2d3748' }}>
@@ -110,7 +115,7 @@ export default async function PenggunaPage() {
                             fontWeight: 'bold'
                           }}
                         >
-                          {isOperatorOrOwner ? 'Turunkan jadi Tenant' : 'Jadikan Operator'}
+                          {isOperatorOrOwner ? 'Turunkan jadi TENANT' : 'Jadikan OPERATOR'}
                         </button>
                       </form>
                     </td>

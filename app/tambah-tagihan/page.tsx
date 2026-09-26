@@ -3,14 +3,17 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
+import { StatusInvoice } from '@prisma/client' // Sesuaikan dengan enum Prisma invoice Anda jika ada
 
-// Server Action untuk menyimpan tagihan baru ke database
+// ==========================================
+// SERVER ACTION: SIMPAN TAGIHAN BARU
+// ==========================================
 async function simpanTagihanAction(formData: FormData) {
   'use server'
   const kamarId = formData.get('kamarId') as string
   const jumlah = formData.get('jumlah') as string
   const jatuhTempo = formData.get('jatuhTempo') as string
-  const status = formData.get('status') as string
+  const status = (formData.get('status') as string) || 'BELUM_LUNAS'
 
   if (!kamarId || !jumlah || !jatuhTempo) return
 
@@ -19,7 +22,7 @@ async function simpanTagihanAction(formData: FormData) {
       kamarId: parseInt(kamarId, 10),
       jumlah: parseFloat(jumlah),
       jatuhTempo: new Date(jatuhTempo),
-      status: status || 'Belum Lunas',
+      status: status as StatusInvoice, // Type casting aman ke Enum Prisma
     },
   })
 
@@ -27,12 +30,15 @@ async function simpanTagihanAction(formData: FormData) {
   redirect('/tagihan')
 }
 
+// ==========================================
+// HALAMAN UTAMA TAMBAH TAGIHAN
+// ==========================================
 export default async function TambahTagihanPage() {
-  // Proteksi Akses: Hanya Operator atau Owner yang dapat membuat tagihan
+  // Proteksi Akses: Hanya Operator atau Owner (Enum Kapital Mutakhir)
   const cookieStore = await cookies()
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (userRole !== 'operator' && userRole !== 'owner') {
+  if (userRole !== 'OPERATOR' && userRole !== 'OWNER') {
     redirect('/')
   }
 
@@ -99,15 +105,15 @@ export default async function TambahTagihanPage() {
           />
         </div>
 
-        {/* Status Awal */}
+        {/* Status Awal (Menggunakan Nilai Enum Kapital) */}
         <div style={{ display: 'grid', gap: '8px' }}>
           <label style={{ fontSize: '13px', fontWeight: 'bold', color: '#cbd5e1' }}>Status Pembayaran</label>
           <select 
             name="status" 
             style={{ padding: '12px', borderRadius: '8px', backgroundColor: '#090d16', color: '#fff', border: '1px solid #334155', outline: 'none', fontSize: '14px' }}
           >
-            <option value="Belum Lunas">Belum Lunas</option>
-            <option value="Lunas">Lunas</option>
+            <option value="BELUM_LUNAS">Belum Lunas</option>
+            <option value="LUNAS">Lunas</option>
           </select>
         </div>
 

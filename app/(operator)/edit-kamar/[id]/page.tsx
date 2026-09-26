@@ -2,39 +2,63 @@ import { prisma } from '@/lib/prisma'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { cookies } from 'next/headers'
+import { revalidatePath } from 'next/cache'
+import SubmitKamarButton from '@/components/SubmitKamarButton'
 
 // ==========================================
-// SERVER ACTION (Diletakkan di luar komponen)
+// SERVER ACTION (Aman & Tervalidasi)
 // ==========================================
 async function editKamarAction(formData: FormData) {
   'use server'
 
-  const id = parseInt(formData.get('id') as string)
+  // 1. Validasi Keamanan: Cek otoritas langsung di dalam Action
+  const cookieStore = await cookies()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+
+  if (userRole !== 'operator' && userRole !== 'owner') {
+    throw new Error('Akses ditolak: Anda tidak memiliki otoritas untuk mengubah data.')
+  }
+
+  // 2. Validasi Input: Cegah Error 500 (NaN) dari input yang tidak valid
+  const rawId = formData.get('id') as string
+  const id = parseInt(rawId)
+  const harga = parseFloat(formData.get('harga') as string)
+  
   const nomorKamar = formData.get('nomorKamar') as string
   const tipe = formData.get('tipe') as string
-  const harga = parseFloat(formData.get('harga') as string)
   const status = formData.get('status') as string
 
-  // Update data di database menggunakan Prisma
-  await prisma.kamar.update({
-    where: { id },
-    data: {
-      nomorKamar,
-      tipe,
-      harga,
-      status,
-    },
-  })
+  if (isNaN(id) || isNaN(harga)) {
+    throw new Error('Validasi gagal: ID atau Harga tidak valid.')
+  }
 
-  // Disesuaikan dengan rute folder Anda: diarahkan kembali ke /edit-kamar
+  try {
+    // 3. Eksekusi Database yang dilindungi try-catch
+    await prisma.kamar.update({
+      where: { id },
+      data: { 
+        nomorKamar, 
+        tipe, 
+        harga, 
+        // PERBAIKAN: Memaksa format teks menjadi kapital sesuai Enum di database
+        status: (status ? status.toUpperCase() : 'TERSEDIA') as 'TERSEDIA' | 'BOOKING' | 'TERISI'
+      },
+    })
+  } catch (error) {
+    console.error("Database Update Error:", error)
+    throw new Error('Gagal memperbarui data di database.')
+  }
+
+  // 4. Hapus Cache Lama: Pastikan pengguna melihat data terbaru
+  revalidatePath('/edit-kamar')
   redirect('/edit-kamar')
 }
 
 // ==========================================
-// KOMPONEN UTAMA HALAMAN EDIT KAMAR
+// KOMPONEN HALAMAN (Mobile-First dengan Tailwind)
 // ==========================================
 export default async function EditKamarPage({ params }: { params: Promise<{ id: string }> }) {
-  // Proteksi Halaman: Izinkan Operator maupun Owner (fleksibel & aman dari case-sensitivity)
+  // Proteksi Tampilan Halaman
   const cookieStore = await cookies()
   const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
 
@@ -42,94 +66,113 @@ export default async function EditKamarPage({ params }: { params: Promise<{ id: 
     redirect('/')
   }
 
-  // Tunggu params dari URL (Standar Next.js 15)
-  const resolvedParams = await params;
-  const id = parseInt(resolvedParams.id);
+  // Resolusi Params (Next.js 15) & Jaring Pengaman ID
+  const resolvedParams = await params
+  const id = parseInt(resolvedParams.id)
 
-  // Ambil data kamar lama berdasarkan ID untuk mengisi form (Pre-fill)
-  const kamar = await prisma.kamar.findUnique({
-    where: { id },
-  })
+  if (isNaN(id)) {
+    return (
+      <main className="p-4 max-w-lg mx-auto mt-10">
+        <div className="bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-lg text-center">
+          Kesalahan URL: ID Kamar tidak valid.
+        </div>
+      </main>
+    )
+  }
+
+  // Ambil data (Pre-fill) dengan proteksi error
+  let kamar
+  try {
+    kamar = await prisma.kamar.findUnique({ where: { id } })
+  } catch (error) {
+    return (
+      <main className="p-4 max-w-lg mx-auto mt-10">
+        <div className="bg-red-900/50 border border-red-500 text-red-200 p-4 rounded-lg text-center">
+          Gagal terhubung ke database. Coba lagi nanti.
+        </div>
+      </main>
+    )
+  }
 
   if (!kamar) {
-    return <main style={{ padding: '40px', color: '#fff', fontFamily: 'sans-serif' }}>Data kamar tidak ditemukan.</main>
+    return (
+      <main className="p-4 max-w-lg mx-auto mt-10">
+        <div className="bg-yellow-900/50 border border-yellow-500 text-yellow-200 p-4 rounded-lg text-center">
+          Data kamar tidak ditemukan.
+        </div>
+      </main>
+    )
   }
 
   return (
-    <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto', color: '#fff' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>✏️ Edit Data Kamar</h1>
-        {/* Tautan kembali disesuaikan ke /edit-kamar */}
-        <Link href="/edit-kamar" style={{ color: '#63b3ed', textDecoration: 'none', fontSize: '14px' }}>
-          &larr; Kembali ke Manajemen Kamar
+    <main className="p-4 md:p-8 max-w-2xl mx-auto font-sans text-gray-100">
+      
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
+        <h1 className="text-2xl font-bold m-0">✏️ Edit Data Kamar</h1>
+        <Link 
+          href="/edit-kamar" 
+          className="text-blue-400 hover:text-blue-300 transition-colors text-sm font-medium"
+        >
+          &larr; Kembali ke Manajemen
         </Link>
       </div>
 
-      <form action={editKamarAction} style={{ display: 'grid', gap: '15px', background: '#1a202c', padding: '25px', borderRadius: '8px', border: '1px solid #2d3748' }}>
-        {/* Input tersembunyi untuk membawa ID */}
+      <form 
+        action={editKamarAction} 
+        className="grid gap-5 bg-gray-800 p-5 md:p-8 rounded-xl border border-gray-700 shadow-2xl"
+      >
         <input type="hidden" name="id" value={kamar.id} />
 
         <div>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px', color: '#a0aec0' }}>Nomor Kamar</label>
+          <label className="block mb-2 font-semibold text-sm text-gray-400">Nomor Kamar</label>
           <input 
             type="text" 
             name="nomorKamar" 
             required 
             defaultValue={kamar.nomorKamar}
-            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #4a5568', background: '#2d3748', color: '#fff', boxSizing: 'border-box' }}
+            className="w-full p-3 rounded-lg border border-gray-600 bg-gray-900 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
           />
         </div>
 
         <div>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px', color: '#a0aec0' }}>Tipe Kamar</label>
+          <label className="block mb-2 font-semibold text-sm text-gray-400">Tipe Kamar</label>
           <input 
             type="text" 
             name="tipe" 
             required 
             defaultValue={kamar.tipe}
-            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #4a5568', background: '#2d3748', color: '#fff', boxSizing: 'border-box' }}
+            className="w-full p-3 rounded-lg border border-gray-600 bg-gray-900 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
           />
         </div>
 
         <div>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px', color: '#a0aec0' }}>Harga per Bulan (Rp)</label>
+          <label className="block mb-2 font-semibold text-sm text-gray-400">Harga per Bulan (Rp)</label>
           <input 
             type="number" 
             name="harga" 
             required 
             defaultValue={kamar.harga}
-            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #4a5568', background: '#2d3748', color: '#fff', boxSizing: 'border-box' }}
+            className="w-full p-3 rounded-lg border border-gray-600 bg-gray-900 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
           />
         </div>
 
         <div>
-          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '14px', color: '#a0aec0' }}>Status</label>
+          <label className="block mb-2 font-semibold text-sm text-gray-400">Status</label>
           <select 
             name="status" 
             defaultValue={kamar.status}
-            style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #4a5568', background: '#2d3748', color: '#fff', boxSizing: 'border-box' }}
+            className="w-full p-3 rounded-lg border border-gray-600 bg-gray-900 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all appearance-none"
           >
-            <option value="Tersedia">Tersedia</option>
-            <option value="Booking">Booking</option>
-            <option value="Terisi">Terisi</option>
+            {/* PERBAIKAN: Value diubah menjadi huruf kapital agar langsung selaras dengan Enum database */}
+            <option value="TERSEDIA">Tersedia</option>
+            <option value="BOOKING">Booking</option>
+            <option value="TERISI">Terisi</option>
           </select>
         </div>
 
-        <button 
-          type="submit" 
-          style={{ 
-            backgroundColor: '#ecc94b', 
-            color: '#744210', 
-            padding: '12px', 
-            borderRadius: '4px', 
-            border: 'none', 
-            fontWeight: 'bold', 
-            cursor: 'pointer',
-            marginTop: '10px'
-          }}
-        >
-          Update Kamar
-        </button>
+        <div className="pt-2">
+          <SubmitKamarButton />
+        </div>
       </form>
     </main>
   )

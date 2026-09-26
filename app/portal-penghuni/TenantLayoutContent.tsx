@@ -117,6 +117,7 @@ export default function TenantLayoutContent({
     { name: 'Keuangan Saya', path: '/portal-penghuni/keuangan', icon: '💳' },
     { name: 'Kontrak Sewa', path: '/portal-penghuni/kontrak', icon: '📄' },
     { name: 'Lapor Bantuan', path: '/portal-penghuni/bantuan', icon: '🛠️' },
+    { name: 'Papan Pengumuman', path: '/portal-penghuni/pengumuman', icon: '📢' },
   ]
 
   const hotlineWa = nomorDarurat || '6280000000000'
@@ -196,7 +197,7 @@ export default function TenantLayoutContent({
         </div>
 
         <div style={{ padding: '16px', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
-          <SettingsPopover userName={namaTenant} userRole="Tenant Aktif" />
+          <SettingsPopover userName={namaTenant} userRole="TENANT AKTIF" />
         </div>
       </aside>
 

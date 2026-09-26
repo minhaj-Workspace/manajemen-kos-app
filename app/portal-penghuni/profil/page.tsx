@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs'
 // SERVER ACTIONS
 // ==========================================
 
-// 1. Action untuk Mengajukan Pembaruan KTP (Workflow Aman / Approval System)
+// 1. Action untuk Mengajukan/Mengunggah KTP (Mandiri oleh Tenant)
 async function ajukanPembaruanKtpAction(formData: FormData) {
   'use server'
   const file = formData.get('fileKtp') as File
@@ -20,20 +20,37 @@ async function ajukanPembaruanKtpAction(formData: FormData) {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
   const fileName = `ktp-req-${penghuniId}-${Date.now()}.${file.name.split('.').pop()}`
-  await writeFile(path.join(process.cwd(), 'public/uploads', fileName), buffer)
   
-  await prisma.persetujuanBerkas.create({
-    data: {
-      penghuniId: penghuniId,
-      fotoKtpBaru: `/uploads/${fileName}`,
-      status: 'PENDING'
-    }
-  })
+  // Pastikan direktori public/uploads tersedia
+  const uploadDir = path.join(process.cwd(), 'public/uploads')
+  await writeFile(path.join(uploadDir, fileName), buffer)
+  
+  const filePath = `/uploads/${fileName}`
+
+  // Cek apakah penghuni sudah memiliki KTP sebelumnya
+  const penghuni = await prisma.penghuni.findUnique({ where: { id: penghuniId } })
+
+  if (!penghuni?.fotoKtp) {
+    // Jika KTP benar-benar kosong (Pendaftaran Mandiri), langsung setel sebagai KTP utama
+    await prisma.penghuni.update({
+      where: { id: penghuniId },
+      data: { fotoKtp: filePath }
+    })
+  } else {
+    // Jika sudah ada, masukkan ke tabel persetujuan berkas (Approval System)
+    await prisma.persetujuanBerkas.create({
+      data: {
+        penghuniId: penghuniId,
+        fotoKtpBaru: filePath,
+        status: 'PENDING'
+      }
+    })
+  }
   
   revalidatePath('/portal-penghuni/profil')
 }
 
-// 2. Action untuk Memperbarui Nama Tampilan Akun & No HP (Nama Resmi Dikunci)
+// 2. Action untuk Memperbarui Nama Tampilan Akun & No HP
 async function updateProfilTenantAction(formData: FormData) {
   'use server'
   const userId = parseInt(formData.get('userId') as string, 10)
@@ -43,7 +60,6 @@ async function updateProfilTenantAction(formData: FormData) {
 
   if (!userId || !penghuniId) return
 
-  // Update nama panggilan / nama tampilan di tabel User
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -51,7 +67,6 @@ async function updateProfilTenantAction(formData: FormData) {
     }
   })
 
-  // Update nomor HP di tabel Penghuni
   await prisma.penghuni.update({
     where: { id: penghuniId },
     data: {
@@ -87,9 +102,9 @@ async function updatePasswordAction(formData: FormData) {
 export default async function ProfilPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userId || userRole !== 'tenant') redirect('/')
+  if (!userId || userRole !== 'TENANT') redirect('/')
 
   const parsedUserId = parseInt(userId, 10)
 
@@ -141,7 +156,6 @@ export default async function ProfilPenghuniPage() {
               <input type="hidden" name="penghuniId" value={penghuni.id} />
               <input type="hidden" name="userId" value={parsedUserId} />
 
-              {/* Nama Lengkap Resmi (Terkunci / Read-Only) */}
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Nama Lengkap Resmi (Sesuai Kontrak/KTP)</label>
                 <input 
@@ -153,7 +167,6 @@ export default async function ProfilPenghuniPage() {
                 <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>*Data hukum resmi tidak dapat diubah sendiri.</span>
               </div>
 
-              {/* Nama Panggilan / Nama Akun (Bisa Diedit Bebas) */}
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Nama Panggilan / Nama Tampilan Akun</label>
                 <input 
@@ -165,7 +178,6 @@ export default async function ProfilPenghuniPage() {
                 />
               </div>
 
-              {/* Nomor WhatsApp (Bisa Diedit Bebas) */}
               <div>
                 <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Nomor WhatsApp Aktif</label>
                 <input 
@@ -252,22 +264,22 @@ export default async function ProfilPenghuniPage() {
                 <div style={{ backgroundColor: '#090d16', border: '1px solid rgba(74, 222, 128, 0.3)', padding: '14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <p style={{ margin: '0 0 2px 0', color: '#4ade80', fontSize: '13px', fontWeight: 'bold' }}>✅ Berkas Terverifikasi</p>
-                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Scan KTP Anda sudah tersimpan di arsip.</p>
+                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Scan KTP Anda sudah tersimpan di arsip[cite: 10].</p>
                   </div>
-                  <a href={penghuni.fotoKtp} target="_blank" rel="noopener noreferrer" style={{ backgroundColor: '#166534', color: '#fff', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none' }}>Lihat KTP</a>
+                  <a href={penghuni.fotoKtp} target="_blank" rel="noopener noreferrer" style={{ backgroundColor: '#166534', color: '#fff', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none' }}>Lihat KTP[cite: 10]</a>
                 </div>
 
                 {pengajuanAktif ? (
                   <div style={{ backgroundColor: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', padding: '12px', borderRadius: '8px' }}>
-                    <p style={{ margin: 0, color: '#facc15', fontSize: '12px', fontWeight: 'bold' }}>⏳ Pengajuan Perubahan KTP Sedang Ditinjau</p>
-                    <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '11px' }}>Berkas baru Anda sedang menunggu persetujuan dari pengelola/owner kos.</p>
+                    <p style={{ margin: 0, color: '#facc15', fontSize: '12px', fontWeight: 'bold' }}>⏳ Pengajuan Perubahan KTP Sedang Ditinjau[cite: 10]</p>
+                    <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '11px' }}>Berkas baru Anda sedang menunggu persetujuan dari pengelola/owner kos[cite: 10].</p>
                   </div>
                 ) : (
                   <form action={ajukanPembaruanKtpAction} style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '14px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <input type="hidden" name="penghuniId" value={penghuni.id} />
-                    <p style={{ margin: 0, fontSize: '11px', color: '#cbd5e1' }}>Ingin memperbarui data KTP? Ajukan file baru ke pengelola:</p>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#cbd5e1' }}>Ingin memperbarui data KTP? Ajukan file baru ke pengelola[cite: 10]:</p>
                     <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '11px', border: '1px solid #334155' }} />
-                    <button type="submit" style={{ backgroundColor: '#38bdf8', color: '#090d16', border: 'none', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', alignSelf: 'flex-start' }}>Ajukan Pembaruan KTP</button>
+                    <button type="submit" style={{ backgroundColor: '#38bdf8', color: '#090d16', border: 'none', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', alignSelf: 'flex-start' }}>Ajukan Pembaruan KTP[cite: 10]</button>
                   </form>
                 )}
               </div>

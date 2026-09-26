@@ -3,10 +3,19 @@ import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { AddKamarButton, DeleteKamarForm } from '@/components/KamarClientActions'
 
-// Server Action untuk Menambah Kamar Baru
+// ==========================================
+// SERVER ACTIONS (Aman & Anti-Crash)
+// ==========================================
 async function tambahKamarAction(formData: FormData) {
   'use server'
+  
+  // 1. Proteksi Keamanan Lapis Server
+  const cookieStore = await cookies()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  if (userRole !== 'operator' && userRole !== 'owner') throw new Error('Akses ditolak')
+
   const nomorKamar = formData.get('nomorKamar') as string
   const tipe = formData.get('tipe') as string
   const harga = parseFloat(formData.get('harga') as string) || 0
@@ -14,33 +23,56 @@ async function tambahKamarAction(formData: FormData) {
 
   if (!nomorKamar) return
 
-  await prisma.kamar.create({
-    data: {
-      nomorKamar,
-      tipe: tipe || 'Standar',
-      harga,
-      status: status || 'TERSEDIA'
-    }
-  })
-
-  revalidatePath('/edit-kamar')
+  try {
+    await prisma.kamar.create({
+      data: {
+        nomorKamar,
+        tipe: tipe || 'Standar',
+        harga,
+        // PERBAIKAN: Memaksa format teks menjadi kapital sesuai Enum di database
+        status: (status ? status.toUpperCase() : 'TERSEDIA') as 'TERSEDIA' | 'BOOKING' | 'TERISI'
+      }
+    })
+    revalidatePath('/edit-kamar')
+  } catch (error) {
+    console.error("Gagal menambah kamar:", error)
+  }
 }
 
-// Server Action untuk Menghapus Kamar
 async function hapusKamarAction(formData: FormData) {
   'use server'
+  
+  const cookieStore = await cookies()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  if (userRole !== 'operator' && userRole !== 'owner') throw new Error('Akses ditolak')
+
   const id = parseInt(formData.get('id') as string)
-  if (!id) return
+  if (isNaN(id)) return
 
-  await prisma.kamar.delete({
-    where: { id }
-  })
+  try {
+    // 2. Proteksi Crash: Cek apakah kamar masih ada penghuninya
+    const kamarCek = await prisma.kamar.findUnique({ 
+      where: { id }, 
+      include: { penghuni: true } 
+    })
 
-  revalidatePath('/edit-kamar')
+    // Jika kamar terhubung dengan data penghuni aktif, batalkan penghapusan
+    if (kamarCek?.penghuni && kamarCek.penghuni.length > 0) {
+      console.warn(`Kamar ${kamarCek.nomorKamar} tidak bisa dihapus karena masih terisi.`)
+      return 
+    }
+
+    await prisma.kamar.delete({ where: { id } })
+    revalidatePath('/edit-kamar')
+  } catch (error) {
+    console.error("Gagal menghapus kamar:", error)
+  }
 }
 
+// ==========================================
+// KOMPONEN HALAMAN (Mobile-First Card Layout)
+// ==========================================
 export default async function DaftarKamarPage() {
-  // Proteksi Halaman: Izinkan Operator maupun Owner (fleksibel & aman dari case-sensitivity)
   const cookieStore = await cookies()
   const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
 
@@ -48,117 +80,130 @@ export default async function DaftarKamarPage() {
     redirect('/')
   }
 
-  // Ambil seluruh daftar kamar dari database
+  // Ambil data kamar beserta data penghuninya
   const daftarKamar = await prisma.kamar.findMany({
     include: { penghuni: true },
     orderBy: { nomorKamar: 'asc' }
   })
 
   return (
-    <div style={{ padding: '24px 30px', fontFamily: 'sans-serif', backgroundColor: '#04060b', minHeight: '100vh', color: '#f8fafc', boxSizing: 'border-box' }}>
+    <main className="p-4 md:p-8 min-h-screen bg-slate-950 font-sans text-slate-100">
       
-      {/* Header Halaman */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: '20px', marginBottom: '24px' }}>
-        <div>
-          <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>MANAJEMEN OPERASIONAL</span>
-          <h1 style={{ fontSize: '22px', fontWeight: 'bold', color: '#fff', margin: '4px 0 4px 0' }}>🚪 Daftar & Pengaturan Kamar Kos</h1>
-          <p style={{ color: '#94a3b8', fontSize: '13px', margin: 0 }}>Kelola status unit kamar, fasilitas, dan harga sewa secara real-time.</p>
-        </div>
+      {/* Header */}
+      <div className="border-b border-slate-800 pb-5 mb-6">
+        <span className="text-xs uppercase tracking-widest text-emerald-400 font-bold">
+          Manajemen Operasional
+        </span>
+        <h1 className="text-2xl font-bold text-white mt-1 mb-1 flex items-center gap-2">
+          <span className="text-yellow-500">🚪</span> Daftar & Pengaturan Kamar
+        </h1>
+        <p className="text-sm text-slate-400">
+          Kelola status unit kamar, fasilitas, dan harga sewa secara real-time.
+        </p>
       </div>
 
-      {/* Grid Konten: Tabel Daftar Kamar & Form Tambah */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* Tabel Daftar Kamar */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px' }}>
-          <h2 style={{ fontSize: '15px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px', fontWeight: 'bold' }}>
+        {/* Kolom Kiri: Daftar Kamar (Format Card List untuk HP) */}
+        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
+          <h2 className="text-lg font-bold text-white mb-4 pb-3 border-b border-slate-800">
             📋 Daftar Unit Kamar
           </h2>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead style={{ backgroundColor: '#1e293b', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase' }}>
-                <tr>
-                  <th style={{ padding: '12px 16px' }}>Nomor Kamar</th>
-                  <th style={{ padding: '12px 16px' }}>Tipe / Fasilitas</th>
-                  <th style={{ padding: '12px 16px' }}>Harga / Bulan</th>
-                  <th style={{ padding: '12px 16px' }}>Status Penghuni</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'center' }}>Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daftarKamar.map((kamar) => (
-                  <tr key={kamar.id} style={{ borderBottom: '1px solid #1e293b' }}>
-                    <td style={{ padding: '12px 16px', color: '#f8fafc', fontWeight: 'bold' }}>Kamar {kamar.nomorKamar}</td>
-                    <td style={{ padding: '12px 16px', color: '#94a3b8' }}>{kamar.tipe || 'Standar'}</td>
-                    <td style={{ padding: '12px 16px', color: '#38bdf8' }}>Rp {kamar.harga?.toLocaleString('id-ID') || '0'}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ 
-                        backgroundColor: kamar.status === 'TERISI' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)', 
-                        color: kamar.status === 'TERISI' ? '#60a5fa' : '#4ade80', 
-                        padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold' 
-                      }}>
-                        {kamar.status || 'TERSEDIA'}
+          <div className="flex flex-col gap-3">
+            {daftarKamar.map((kamar) => {
+              const isTerisi = kamar.status.toLowerCase() === 'terisi' || kamar.penghuni.length > 0;
+              
+              return (
+                <div 
+                  key={kamar.id} 
+                  className="flex flex-col md:flex-row justify-between p-4 bg-slate-950/50 border border-slate-800 rounded-lg gap-4 md:items-center hover:border-slate-700 transition-colors"
+                >
+                  {/* Info Kamar */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-bold text-lg text-white">Kamar {kamar.nomorKamar}</h3>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        isTerisi ? 'bg-blue-900/30 text-blue-400 border border-blue-800/50' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/50'
+                      }`}>
+                        {kamar.status}
                       </span>
-                    </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'center', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                      {/* Tautan menuju folder [id] untuk mengedit kamar spesifik */}
-                      <Link 
-                        href={`/edit-kamar/${kamar.id}`}
-                        style={{ backgroundColor: '#0284c7', color: '#fff', textDecoration: 'none', padding: '6px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}
-                      >
-                        Edit Detail
-                      </Link>
+                    </div>
+                    <p className="text-sm text-slate-400">
+                      {kamar.tipe} • <span className="text-yellow-500/90 font-medium">Rp {kamar.harga?.toLocaleString('id-ID')}</span>/bln
+                    </p>
+                  </div>
 
-                      {/* Tombol Hapus Kamar */}
-                      <form action={hapusKamarAction}>
-                        <input type="hidden" name="id" value={kamar.id} />
-                        <button type="submit" style={{ backgroundColor: '#7f1d1d', color: '#fca5a5', border: 'none', padding: '6px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}>
-                          Hapus
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                ))}
-                {daftarKamar.length === 0 && (
-                  <tr>
-                    <td colSpan={5} style={{ padding: '30px', textAlign: 'center', color: '#64748b' }}>
-                      Belum ada data kamar terdaftar di sistem.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  {/* Tombol Aksi */}
+                  <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0 pt-3 md:pt-0 border-t border-slate-800 md:border-none">
+                    <Link 
+                      href={`/edit-kamar/${kamar.id}`}
+                      className="flex-1 md:flex-none text-center bg-blue-600/80 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow-lg shadow-blue-900/20"
+                    >
+                      Edit Detail
+                    </Link>
+                    
+                    {/* Menggunakan komponen form hapus klien */}
+                    <DeleteKamarForm id={kamar.id} hapusAction={hapusKamarAction} />
+                  </div>
+                </div>
+              )
+            })}
+
+            {daftarKamar.length === 0 && (
+              <div className="text-center p-8 text-slate-500 border border-dashed border-slate-700 rounded-lg">
+                Belum ada data kamar terdaftar di sistem.
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Form Tambah Kamar Baru */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px' }}>
-          <h2 style={{ fontSize: '15px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px', fontWeight: 'bold' }}>
-            ➕ Tambah Unit Kamar Baru
+        {/* Kolom Kanan: Form Tambah Kamar */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl sticky top-6">
+          <h2 className="text-lg font-bold text-white mb-4 pb-3 border-b border-slate-800">
+            ➕ Tambah Unit Baru
           </h2>
-          <form action={tambahKamarAction} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
+          
+          <form action={tambahKamarAction} className="flex flex-col gap-4">
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Nomor Kamar</label>
-              <input type="text" name="nomorKamar" required placeholder="Contoh: 101" style={{ width: '100%', padding: '10px', backgroundColor: '#04060b', border: '1px solid #334155', color: '#fff', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+              <label className="block text-xs font-bold text-slate-400 mb-2">Nomor Kamar</label>
+              <input 
+                type="text" 
+                name="nomorKamar" 
+                required 
+                placeholder="Contoh: 101" 
+                className="w-full p-3 bg-slate-950 border border-slate-700 text-white rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none" 
+              />
             </div>
+            
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Tipe / Fasilitas</label>
-              <input type="text" name="tipe" placeholder="Contoh: AC / Deluxe" style={{ width: '100%', padding: '10px', backgroundColor: '#04060b', border: '1px solid #334155', color: '#fff', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+              <label className="block text-xs font-bold text-slate-400 mb-2">Tipe / Fasilitas</label>
+              <input 
+                type="text" 
+                name="tipe" 
+                placeholder="Contoh: AC / Deluxe" 
+                className="w-full p-3 bg-slate-950 border border-slate-700 text-white rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none" 
+              />
             </div>
+            
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 'bold' }}>Harga Sewa (Bulan)</label>
-              <input type="number" name="harga" required placeholder="Contoh: 750000" style={{ width: '100%', padding: '10px', backgroundColor: '#04060b', border: '1px solid #334155', color: '#fff', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+              <label className="block text-xs font-bold text-slate-400 mb-2">Harga Sewa (Per Bulan)</label>
+              <input 
+                type="number" 
+                name="harga" 
+                required 
+                placeholder="Contoh: 750000" 
+                className="w-full p-3 bg-slate-950 border border-slate-700 text-white rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none" 
+              />
             </div>
-            <div>
-              <button type="submit" style={{ width: '100%', backgroundColor: '#10b981', color: '#04060b', padding: '11px', borderRadius: '6px', border: 'none', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
-                Simpan Kamar Baru
-              </button>
+            
+            <div className="pt-2">
+              <AddKamarButton />
             </div>
           </form>
         </div>
 
       </div>
-    </div>
+    </main>
   )
 }

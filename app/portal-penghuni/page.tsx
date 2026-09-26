@@ -6,9 +6,10 @@ import Link from 'next/link'
 export default async function PortalPenghuniBerandaPage() {
   const cookieStore = await cookies()
   const userIdStr = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userIdStr || userRole !== 'tenant') redirect('/')
+  // Proteksi Akses menggunakan Enum 'TENANT'
+  if (!userIdStr || userRole !== 'TENANT') redirect('/')
   const idUser = parseInt(userIdStr, 10)
   if (isNaN(idUser)) redirect('/')
 
@@ -28,7 +29,7 @@ export default async function PortalPenghuniBerandaPage() {
   if (!penghuni) redirect('/')
 
   const daftarInvoice = penghuni.kamar?.invoices || []
-  const tagihanAktif = daftarInvoice.find(inv => inv.status !== 'Lunas')
+  const tagihanAktif = daftarInvoice.find(inv => inv.status !== 'LUNAS')
   const kontrakAktif = penghuni.kontrak[0]
   const daftarTiket = penghuni.kamar?.maintenances || []
 
@@ -44,7 +45,6 @@ export default async function PortalPenghuniBerandaPage() {
   }
 
   return (
-    // PERBAIKAN: Menghapus minHeight: '100vh' agar tinggi halaman tidak tumpah dan memicu scrollbar!
     <div style={{ padding: '24px 30px', fontFamily: 'sans-serif', color: '#f8fafc', boxSizing: 'border-box' }}>
       
       {/* HEADER UTAMA BENTUK MELEBAR */}
@@ -89,7 +89,7 @@ export default async function PortalPenghuniBerandaPage() {
                   : `Peringatan Tagihan: Jatuh tempo dalam ${sisaHari} hari`}
               </h3>
               <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>
-                Terdapat tagihan aktif sebesar <strong style={{ color: '#fff' }}>Rp {tagihanAktif.jumlah.toLocaleString('id-ID')}</strong> ({tagihanAktif.status}). Segera unggah bukti bayar.
+                Terdapat tagihan aktif sebesar <strong style={{ color: '#fff' }}>Rp {tagihanAktif.jumlah.toLocaleString('id-ID')}</strong> ({tagihanAktif.status.replace('_', ' ')}). Segera unggah bukti bayar.
               </p>
             </div>
           </div>
@@ -109,44 +109,50 @@ export default async function PortalPenghuniBerandaPage() {
         </div>
       )}
 
-      {/* BARIS 1: KARTU METRIK UTAMA */}
+      {/* BARIS 1: KARTU METRIK UTAMA (INTERAKTIF DENGAN LINK) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '24px' }}>
         
         {/* KARTU KAMAR */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#38bdf8' }}></div>
-          <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Kamar Saat Ini</p>
-          <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-            {penghuni.kamar ? `Kamar ${penghuni.kamar.nomorKamar}` : '-'}
-          </h3>
-          <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>
-            Tipe {penghuni.kamar?.tipe || 'Kamar'}
-          </p>
-        </div>
+        <Link href="/portal-penghuni/profil" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden', transition: 'border-color 0.2s', cursor: 'pointer' }} className="hover:border-sky-500/50">
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#38bdf8' }}></div>
+            <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Kamar Saat Ini</p>
+            <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
+              {penghuni.kamar ? `Kamar ${penghuni.kamar.nomorKamar}` : '-'}
+            </h3>
+            <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>
+              Tipe {penghuni.kamar?.tipe || 'Kamar'} (Lihat Profil →)
+            </p>
+          </div>
+        </Link>
 
         {/* KARTU DURASI KONTRAK */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#4ade80' }}></div>
-          <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sisa Kontrak</p>
-          <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-            {kontrakAktif ? `${kontrakAktif.durasiBulan} Bulan` : '-'}
-          </h3>
-          <p style={{ margin: 0, fontSize: '12px', color: '#4ade80' }}>
-            Status: {kontrakAktif?.status || 'Aktif'}
-          </p>
-        </div>
+        <Link href="/portal-penghuni/kontrak" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden', transition: 'border-color 0.2s', cursor: 'pointer' }} className="hover:border-emerald-500/50">
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#4ade80' }}></div>
+            <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sisa Kontrak</p>
+            <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
+              {kontrakAktif ? `${kontrakAktif.durasiBulan} Bulan` : '-'}
+            </h3>
+            <p style={{ margin: 0, fontSize: '12px', color: '#4ade80' }}>
+              Status: {kontrakAktif?.status || 'AKTIF'} (Kelola Kontrak →)
+            </p>
+          </div>
+        </Link>
 
         {/* KARTU STATUS TAGIHAN */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: tagihanAktif ? '#f87171' : '#facc15' }}></div>
-          <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status Pembayaran</p>
-          <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-            {tagihanAktif ? `Rp ${tagihanAktif.jumlah.toLocaleString('id-ID')}` : 'Lunas'}
-          </h3>
-          <p style={{ margin: 0, fontSize: '12px', color: tagihanAktif ? '#f87171' : '#facc15' }}>
-            {tagihanAktif ? 'Anda memiliki tagihan tertunda' : 'Semua tagihan lunas'}
-          </p>
-        </div>
+        <Link href="/portal-penghuni/keuangan" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden', transition: 'border-color 0.2s', cursor: 'pointer' }} className="hover:border-amber-500/50">
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: tagihanAktif ? '#f87171' : '#facc15' }}></div>
+            <p style={{ margin: '0 0 6px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Status Pembayaran</p>
+            <h3 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 4px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
+              {tagihanAktif ? `Rp ${tagihanAktif.jumlah.toLocaleString('id-ID')}` : 'Lunas'}
+            </h3>
+            <p style={{ margin: 0, fontSize: '12px', color: tagihanAktif ? '#f87171' : '#facc15' }}>
+              {tagihanAktif ? 'Tagihan tertunda (Cek Detail →)' : 'Semua tagihan lunas'}
+            </p>
+          </div>
+        </Link>
 
       </div>
 

@@ -3,7 +3,9 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-// Server Action untuk memproses Booking (SOP 3 & 4)
+// ==========================================
+// SERVER ACTION (Enum Mutakhir: PENDING, BELUM_LUNAS, BOOKING)
+// ==========================================
 async function submitBookingAction(formData: FormData) {
   'use server'
   const cookieStore = await cookies()
@@ -11,15 +13,13 @@ async function submitBookingAction(formData: FormData) {
 
   if (!userId) redirect('/login')
 
-  // Ambil data dari form
-  const kamarId = parseInt(formData.get('kamarId') as string)
+  const kamarId = parseInt(formData.get('kamarId') as string, 10)
   const nama = formData.get('nama') as string
   const nomorHp = formData.get('nomorHp') as string
   const nik = formData.get('nik') as string
-  const durasiBulan = parseInt(formData.get('durasiBulan') as string)
+  const durasiBulan = parseInt(formData.get('durasiBulan') as string, 10)
   const tanggalMulai = new Date(formData.get('tanggalMulai') as string)
   
-  // Cek file fotoKtp dari form (bisa dikembangkan ke depannya untuk cloud storage)
   const fileKtp = formData.get('fotoKtp') as File | null
   const fotoKtp = fileKtp && fileKtp.size > 0 ? fileKtp.name : "pending-upload.jpg" 
 
@@ -27,57 +27,63 @@ async function submitBookingAction(formData: FormData) {
     const kamar = await prisma.kamar.findUnique({ where: { id: kamarId } })
     if (!kamar) return
 
-    // 1. Gunakan upsert agar tidak error saat profil sudah ada
-    const penghuni = await prisma.penghuni.upsert({
-      where: { userId: parseInt(userId) },
-      update: {
-        nama,
-        nomorHp,
-        nik,
-        fotoKtp,
-        tanggalMasuk: tanggalMulai,
-        kamarId: kamar.id
-      },
-      create: {
-        nama,
-        nomorHp,
-        nik,
-        fotoKtp,
-        tanggalMasuk: tanggalMulai,
-        userId: parseInt(userId),
-        kamarId: kamar.id
-      }
-    })
+    await prisma.$transaction(async (tx) => {
+      // 1. Upsert Profil Penghuni
+      const penghuni = await tx.penghuni.upsert({
+        where: { userId: parseInt(userId, 10) },
+        update: {
+          nama,
+          nomorHp,
+          nik,
+          fotoKtp,
+          tanggalMasuk: tanggalMulai,
+          kamarId: kamar.id,
+          isAkunUtama: true
+        },
+        create: {
+          nama,
+          nomorHp,
+          nik,
+          fotoKtp,
+          tanggalMasuk: tanggalMulai,
+          userId: parseInt(userId, 10),
+          kamarId: kamar.id,
+          isAkunUtama: true
+        }
+      })
 
-    // 2. Buat Kontrak (Rentals) Sementara (SOP 4)
-    await prisma.kontrak.create({
-      data: {
-        kamarId: kamar.id,
-        penghuniId: penghuni.id,
-        tanggalMulai,
-        durasiBulan,
-        status: 'Pending' 
-      }
-    })
+      // 2. Buat Kontrak dengan Enum 'PENDING'
+      const kontrakBaru = await tx.kontrak.create({
+        data: {
+          kamarId: kamar.id,
+          penghuniId: penghuni.id,
+          tanggalMulai,
+          durasiBulan,
+          status: 'PENDING' // Enum Mutakhir
+        }
+      })
 
-    // 3. Buat Tagihan (Invoice) (SOP 4)
-    const totalTagihan = kamar.harga * durasiBulan
-    const jatuhTempo = new Date()
-    jatuhTempo.setDate(jatuhTempo.getDate() + 1) // Batas waktu bayar 1x24 jam
+      // 3. Buat Tagihan (Invoice) dengan Enum 'BELUM_LUNAS'
+      const totalTagihan = kamar.harga * durasiBulan
+      const jatuhTempo = new Date()
+      jatuhTempo.setDate(jatuhTempo.getDate() + 1) // Batas waktu 1x24 jam
 
-    await prisma.invoice.create({
-      data: {
-        kamarId: kamar.id,
-        jumlah: totalTagihan,
-        jatuhTempo,
-        status: 'Belum Lunas'
-      }
-    })
+      await tx.invoice.create({
+        data: {
+          kamarId: kamar.id,
+          penghuniId: penghuni.id,
+          kontrakId: kontrakBaru.id,
+          jumlah: totalTagihan,
+          jatuhTempo,
+          status: 'BELUM_LUNAS' // Enum Mutakhir
+        }
+      })
 
-    // 4. Ubah status Kamar agar tidak dipesan orang lain (SOP 4)
-    await prisma.kamar.update({
-      where: { id: kamar.id },
-      data: { status: 'Booking' }
+      // 4. Ubah status Kamar menjadi 'BOOKING'
+      await tx.kamar.update({
+        where: { id: kamar.id },
+        data: { status: 'BOOKING' } // Enum Mutakhir
+      })
     })
 
   } catch (error) {
@@ -85,19 +91,22 @@ async function submitBookingAction(formData: FormData) {
     throw new Error("Gagal melakukan booking. Silakan coba lagi.")
   }
 
-  // 5. Redirect harus berada di luar try-catch 
   redirect('/pembayaran')
 }
 
+// ==========================================
+// KOMPONEN HALAMAN BOOKING
+// ==========================================
 export default async function BookingPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = await params
-  const kamarId = parseInt(resolvedParams.id)
+  const kamarId = parseInt(resolvedParams.id, 10)
   
   const kamar = await prisma.kamar.findUnique({
     where: { id: kamarId }
   })
 
-  if (!kamar || kamar.status !== 'Tersedia') {
+  // Memeriksa ketersediaan menggunakan Enum 'TERSEDIA'
+  if (!kamar || kamar.status !== 'TERSEDIA') {
     return (
       <main style={{ padding: '40px', fontFamily: 'sans-serif', maxWidth: '600px', margin: '0 auto', textAlign: 'center', color: '#fff' }}>
         <h2>Mohon Maaf, kamar ini sudah tidak tersedia atau sedang dibooking orang lain.</h2>

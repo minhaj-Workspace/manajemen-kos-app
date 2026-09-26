@@ -2,10 +2,11 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import AutoRefresh from '@/components/AutoRefresh' // <-- 1. Impor komponen Auto-Refresh
+import AutoRefresh from '@/components/AutoRefresh'
+import KamarModalGrid from '@/components/KamarModalGrid'
 
 export default async function DashboardOperatorPage() {
-  // 1. Proteksi Halaman (Operator & Owner)
+  // 1. Proteksi Halaman Aman
   const cookieStore = await cookies()
   const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
 
@@ -13,184 +14,207 @@ export default async function DashboardOperatorPage() {
     redirect('/')
   }
   
-  // 2. PEMINDAI OTOMATIS (AUTO-SCANNER OVERDUE)
-  try {
-    const hariIni = new Date()
-    hariIni.setHours(0, 0, 0, 0)
-
-    await prisma.invoice.updateMany({
-      where: {
-        status: { notIn: ['Lunas', 'Menunggu Verifikasi', 'Overdue'] },
-        jatuhTempo: { lt: hariIni }
-      },
-      data: { status: 'Overdue' }
-    })
-  } catch (error) {
-    console.error('Gagal memperbarui status tagihan otomatis:', error)
-  }
+  // 2. LOGIKA ZONA WAKTU PRESISI (WITA - Asia/Makassar)
+  const hariIni = new Date()
+  const utcOffset = hariIni.getTimezoneOffset() * 60000
+  const witaOffset = 8 * 3600000 // UTC+8
+  const hariIniWITA = new Date(hariIni.getTime() + utcOffset + witaOffset)
+  hariIniWITA.setHours(0, 0, 0, 0)
 
   // 3. PENGAMBILAN DATA METRIK
   const totalKamar = await prisma.kamar.count()
-  const kamarTerisi = await prisma.kamar.count({ where: { status: 'Terisi' } })
+  const kamarTerisi = await prisma.kamar.count({ where: { status: 'TERISI' } })
   const tingkatOkupansi = totalKamar > 0 ? Math.round((kamarTerisi / totalKamar) * 100) : 0
 
-  const invoiceLunas = await prisma.invoice.count({ where: { status: 'Lunas' } })
-  const invoiceMenunggu = await prisma.invoice.count({ where: { status: 'Menunggu Verifikasi' } })
-  const invoiceOverdue = await prisma.invoice.count({ where: { status: 'Overdue' } })
+  const listSemuaInvoice = await prisma.invoice.findMany()
   
-  const listInvoiceLunas = await prisma.invoice.findMany({ where: { status: 'Lunas' } })
-  const totalKasMasuk = listInvoiceLunas.reduce((acc, inv) => acc + inv.jumlah, 0)
+  const invoiceLunas = listSemuaInvoice.filter(inv => inv.status === 'LUNAS').length
+  const totalKasMasuk = listSemuaInvoice
+    .filter(inv => inv.status === 'LUNAS')
+    .reduce((acc, inv) => acc + inv.jumlah, 0)
+    
+  const invoiceMenunggu = listSemuaInvoice.filter(inv => inv.status === 'MENUNGGU_VERIFIKASI').length
+  
+  const invoiceOverdue = listSemuaInvoice.filter(inv => 
+    inv.status === 'BELUM_LUNAS' && new Date(inv.jatuhTempo) < hariIniWITA
+  ).length
 
-  const totalTiketPending = await prisma.maintenance.count({ where: { status: 'Pending' } })
-  
+  // 4. DATA KAMAR LENGKAP BERSAMA SELURUH PENGHUNI (AKUN UTAMA & PENDAMPING)
   const daftarKamar = await prisma.kamar.findMany({
-    include: { penghuni: true },
+    include: { 
+      penghuni: { 
+        include: { user: true },
+        orderBy: { isAkunUtama: 'desc' }
+      } 
+    },
     orderBy: { nomorKamar: 'asc' }
   })
 
+  // 5. MODUL RISET 1: KONTRAK AKTIF TERDEKAT
+  const kontrakAktif = await prisma.kontrak.findMany({
+    where: { status: 'AKTIF' },
+    include: { kamar: true, penghuni: true },
+    take: 5,
+    orderBy: { tanggalMulai: 'asc' }
+  })
+
+  // 6. MODUL RISET 2: TIKET MAINTENANCE PENDING/DIPROSES (Menggunakan Enum 'DIPROSES')
+  const tiketMaintenance = await prisma.maintenance.findMany({
+    where: { status: { in: ['PENDING', 'DIPROSES'] } },
+    include: { kamar: true },
+    take: 5,
+    orderBy: { createdAt: 'desc' }
+  })
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', padding: '24px 30px', backgroundColor: '#090d16', minHeight: '100vh', color: '#f8fafc', boxSizing: 'border-box' }}>
+    <main className="p-4 md:p-6 lg:p-8 min-h-screen bg-slate-950 font-sans text-slate-100 flex flex-col gap-6">
       
-      {/* 2. Pasang komponen AutoRefresh (bekerja senyap di latar belakang tiap 10 detik) */}
       <AutoRefresh intervalMs={10000} />
 
-      {/* HEADER UTAMA & STATUS OPERASIONAL */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: '20px' }}>
+      {/* HEADER UTAMA */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end border-b border-slate-800 pb-5 gap-4">
         <div>
-          <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>Enterprise Overview</span>
-          <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', margin: '4px 0 6px 0' }}>Operations Dashboard</h1>
-          <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>Real-time monitoring kesehatan finansial, okupansi unit, dan pemeliharaan kos.</p>
+          <span className="text-[10px] uppercase tracking-widest text-sky-400 font-bold">Enterprise Overview</span>
+          <h1 className="text-2xl md:text-3xl font-bold text-white mt-1 mb-2">Operations Dashboard</h1>
+          <p className="text-sm text-slate-400 m-0">Pemantauan real-time finansial, okupansi unit, dan pemeliharaan properti.</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 8px rgba(74,222,128,0.5)' }}></span>
-            <span>System Status: <strong style={{ color: '#4ade80' }}>Normal & Auto-Scan Active</strong></span>
-          </div>
+        <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-xs text-slate-200 flex items-center gap-2 shadow-lg shrink-0 w-fit">
+          <span className="w-2.5 h-2.5 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse"></span>
+          <span className="font-bold tracking-wide">System Normal & Auto-Scan Active</span>
         </div>
       </div>
 
-      {/* KARTU METRIK UTAMA (BENTO GRID STYLE) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+      {/* KARTU METRIK UTAMA */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         
-        {/* KARTU 1: KAS MASUK */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '22px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#4ade80' }}></div>
-          <p style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Kas Masuk (Lunas)</p>
-          <h3 style={{ fontSize: '26px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-            Rp {totalKasMasuk.toLocaleString('id-ID')}
-          </h3>
-          <p style={{ margin: 0, fontSize: '12px', color: '#4ade80' }}>
-            <span>↑ {invoiceLunas} invoice terverifikasi</span>
-          </p>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden shadow-xl">
+          <div className="absolute top-0 left-0 w-1 h-full bg-sky-500"></div>
+          <p className="text-[10px] text-sky-400 font-bold uppercase tracking-widest m-0 mb-2">Total Kas Masuk (Lunas)</p>
+          <h3 className="text-2xl font-bold text-white m-0 mb-1">Rp {totalKasMasuk.toLocaleString('id-ID')}</h3>
+          <p className="text-[11px] text-emerald-400 font-bold m-0 mt-2">↑ {invoiceLunas} invoice terverifikasi</p>
         </div>
 
-        {/* KARTU 2: OKUPANSI */}
-        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '22px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#38bdf8' }}></div>
-          <p style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tingkat Okupansi</p>
-          <h3 style={{ fontSize: '26px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-            {tingkatOkupansi}%
-          </h3>
-          <p style={{ margin: 0, fontSize: '12px', color: '#38bdf8' }}>
-            {kamarTerisi} dari {totalKamar} unit terisi penuh
-          </p>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden shadow-xl">
+          <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+          <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest m-0 mb-2">Tingkat Okupansi</p>
+          <h3 className="text-2xl font-bold text-white m-0 mb-1">{tingkatOkupansi}%</h3>
+          <p className="text-[11px] text-slate-400 font-bold m-0 mt-2">{kamarTerisi} dari {totalKamar} unit terisi</p>
         </div>
 
-        {/* KARTU 3: MENUNGGU VERIFIKASI (Bisa Diklik) */}
-        <Link href="/verifikasi" style={{ textDecoration: 'none', display: 'block' }}>
-          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '22px', position: 'relative', overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.2s' }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#facc15' }}></div>
-            <p style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Menunggu Verifikasi</p>
-            <h3 style={{ fontSize: '26px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-              {invoiceMenunggu}
-            </h3>
-            <p style={{ margin: 0, fontSize: '12px', color: '#facc15' }}>
-              Klik untuk verifikasi bukti TF ➔
+        <Link href="/verifikasi" className="block outline-none group">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden shadow-xl group-hover:bg-slate-800/80 transition-colors h-full">
+            <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
+            <p className="text-[10px] text-amber-400 font-bold uppercase tracking-widest m-0 mb-2">Menunggu Verifikasi</p>
+            <h3 className="text-2xl font-bold text-white m-0 mb-1">{invoiceMenunggu}</h3>
+            <p className="text-[11px] text-amber-400 font-bold m-0 mt-2 flex justify-between items-center">
+              Periksa bukti transfer <span className="group-hover:translate-x-1 transition-transform">➔</span>
             </p>
           </div>
         </Link>
 
-        {/* KARTU 4: KELUHAN PENDING (Bisa Diklik) */}
-        <Link href="/maintenance" style={{ textDecoration: 'none', display: 'block' }}>
-          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '22px', position: 'relative', overflow: 'hidden', cursor: 'pointer', transition: 'transform 0.2s' }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#f87171' }}></div>
-            <p style={{ margin: '0 0 8px 0', color: '#64748b', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Keluhan Pending</p>
-            <h3 style={{ fontSize: '26px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#f8fafc', letterSpacing: '-0.5px' }}>
-              {totalTiketPending}
-            </h3>
-            <p style={{ margin: 0, fontSize: '12px', color: '#f87171' }}>
-              Klik untuk proses perbaikan ➔
-            </p>
-          </div>
-        </Link>
-
-        {/* KARTU 5: TAGIHAN OVERDUE */}
-        <Link href="/tagihan" style={{ textDecoration: 'none', display: 'block' }}>
-          <div style={{ backgroundColor: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '14px', padding: '22px', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#ef4444' }}></div>
-            <p style={{ margin: '0 0 8px 0', color: '#fca5a5', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Tagihan Overdue</p>
-            <h3 style={{ fontSize: '26px', fontWeight: 'bold', margin: '0 0 6px 0', color: '#fff', letterSpacing: '-0.5px' }}>
-              {invoiceOverdue}
-            </h3>
-            <p style={{ margin: 0, fontSize: '12px', color: '#f87171' }}>
-              Penyewa terlambat bayar ➔
+        <Link href="/tagihan" className="block outline-none group">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative overflow-hidden shadow-xl group-hover:bg-slate-800/80 transition-colors h-full">
+            <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
+            <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest m-0 mb-2">Tagihan Overdue</p>
+            <h3 className="text-2xl font-bold text-white m-0 mb-1">{invoiceOverdue}</h3>
+            <p className="text-[11px] text-red-400 font-bold m-0 mt-2 flex justify-between items-center">
+              Penyewa terlambat bayar <span className="group-hover:translate-x-1 transition-transform">➔</span>
             </p>
           </div>
         </Link>
 
       </div>
 
-      {/* SECTION DAFTAR UNIT KAMAR */}
-      <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '26px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #1e293b', paddingBottom: '16px' }}>
+      {/* DAFTAR UNIT KAMAR INTERAKTIF (KLIK KARTU UNTUK BUKA POPUP MODAL) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 shadow-2xl mt-2">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center border-b border-slate-800 pb-4 mb-5 gap-3">
           <div>
-            <h2 style={{ fontSize: '16px', fontWeight: 'bold', color: '#fff', margin: '0 0 4px 0' }}>📋 Manajemen Unit & Status Kamar</h2>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Daftar seluruh kamar aktif beserta informasi penghuni saat ini.</p>
+            <h2 className="text-base font-bold text-white m-0 mb-1 flex items-center gap-2">
+              <span className="text-sky-400">📋</span> Manajemen Unit & Status Kamar
+            </h2>
+            <p className="text-xs text-slate-400 m-0">Klik kartu unit untuk membuka detail profil penghuni & aksi cepat.</p>
           </div>
-          <span style={{ fontSize: '12px', backgroundColor: '#1e293b', color: '#38bdf8', padding: '6px 12px', borderRadius: '6px', fontWeight: '600' }}>
-            Total: {totalKamar} Unit
+          <span className="bg-slate-950 border border-slate-800 text-sky-400 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider w-fit">
+            Total {totalKamar} Unit
           </span>
         </div>
 
-        <div style={{ display: 'grid', gap: '12px' }}>
-          {daftarKamar.map((kamar) => {
-            const namaPenghuni = kamar.penghuni ? kamar.penghuni.nama : ''
-            const statusLabel = kamar.status === 'Terisi' && namaPenghuni ? `Terisi • ${namaPenghuni}` : kamar.status
-
-            return (
-              <div key={kamar.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#090d16', padding: '16px 20px', borderRadius: '10px', border: '1px solid #1e293b' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ width: '42px', height: '42px', backgroundColor: '#1e293b', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: '#38bdf8', fontSize: '14px' }}>
-                    {kamar.nomorKamar}
-                  </div>
-                  <div>
-                    <h4 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#fff', fontWeight: '600' }}>
-                      Kamar {kamar.nomorKamar} <span style={{ fontWeight: 'normal', fontSize: '13px', color: '#64748b' }}>• {kamar.tipe}</span>
-                    </h4>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#4ade80', fontWeight: '500' }}>
-                      Rp {kamar.harga.toLocaleString('id-ID')} <span style={{ color: '#64748b', fontWeight: 'normal' }}>/ bulan</span>
-                    </p>
-                  </div>
-                </div>
-                <div>
-                  <span style={{ 
-                    fontSize: '12px', 
-                    fontWeight: '600', 
-                    padding: '6px 14px', 
-                    borderRadius: '20px', 
-                    backgroundColor: kamar.status === 'Terisi' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(56, 189, 248, 0.1)',
-                    color: kamar.status === 'Terisi' ? '#4ade80' : '#38bdf8',
-                    border: kamar.status === 'Terisi' ? '1px solid rgba(74, 222, 128, 0.2)' : '1px solid rgba(56, 189, 248, 0.2)'
-                  }}>
-                    {statusLabel}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        {/* MODAL GRID CLIENT COMPONENT */}
+        <KamarModalGrid daftarKamar={daftarKamar} />
       </div>
 
-    </div>
+      {/* MODUL RISET STANDAR INDUSTRI (Dua Panel Berdampingan) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2">
+        
+        {/* PANEL 1: MONITORING KONTRAK SEWA AKTIF */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+              <h3 className="text-sm font-bold text-white m-0 flex items-center gap-2">
+                <span className="text-amber-400">📅</span> Kontrak Sewa Aktif ({kontrakAktif.length})
+              </h3>
+              <Link href="/penghuni" className="text-xs text-sky-400 hover:underline font-semibold">Lihat Semua →</Link>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              {kontrakAktif.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                  Belum ada kontrak aktif tercatat.
+                </div>
+              ) : (
+                kontrakAktif.map((k) => (
+                  <div key={k.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold text-white">Kamar {k.kamar.nomorKamar}</span>
+                      <span className="text-slate-400 block text-[11px]">Penghuni: {k.penghuni.nama}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-emerald-400 font-bold block">{k.durasiBulan} Bulan</span>
+                      <span className="text-[10px] text-slate-500">Mulai: {new Date(k.tanggalMulai).toLocaleDateString('id-ID')}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* PANEL 2: TIKET MAINTENANCE & PERBAIKAN AKTIF */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 shadow-xl flex flex-col justify-between">
+          <div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-4">
+              <h3 className="text-sm font-bold text-white m-0 flex items-center gap-2">
+                <span className="text-red-400">🛠️</span> Tiket Maintenance Aktif ({tiketMaintenance.length})
+              </h3>
+              <Link href="/maintenance" className="text-xs text-sky-400 hover:underline font-semibold">Kelola Tiket →</Link>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              {tiketMaintenance.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-lg">
+                  Tidak ada tiket perbaikan yang pending.
+                </div>
+              ) : (
+                tiketMaintenance.map((t) => (
+                  <div key={t.id} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold text-white">Kamar {t.kamar ? t.kamar.nomorKamar : '-'}</span>
+                      <span className="text-slate-400 block text-[11px] truncate max-w-[200px]">{t.deskripsi}</span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
+                      t.status === 'PENDING' ? 'bg-red-950 text-red-400 border border-red-800/50' : 'bg-amber-950 text-amber-400 border border-amber-800/50'
+                    }`}>
+                      {t.status}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
   )
 }

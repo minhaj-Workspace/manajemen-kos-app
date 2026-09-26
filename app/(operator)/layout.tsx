@@ -1,33 +1,44 @@
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import OperatorLayoutContent from './OperatorLayoutContent'
-import AutoRefresh from '@/components/AutoRefresh' // <-- 1. Impor komponen Auto-Refresh
+import AutoRefresh from '@/components/AutoRefresh'
 
 export default async function OperatorLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  // 1. Ambil cookie secara asinkron (standar Next.js terbaru)
   const cookieStore = await cookies()
   const userIdStr = cookieStore.get('user_id')?.value
-  const userRoleCookie = cookieStore.get('user_role')?.value || 'Operator'
+  const userRoleCookie = cookieStore.get('user_role')?.value || 'OPERATOR'
 
-  let namaUser = 'Minhajuddin Madi'
-  let roleUser = userRoleCookie
+  let namaUser = 'Operator Sistem'
+  let roleUser = userRoleCookie.toUpperCase()
 
+  // 2. Ambil data profil terbaru dari database jika ID valid
   if (userIdStr) {
-    const user = await prisma.user.findUnique({
-      where: { id: parseInt(userIdStr, 10) }
-    })
-    if (user) {
-      namaUser = user.namaLengkap || user.email.split('@')[0]
-      roleUser = user.role
+    const parsedId = parseInt(userIdStr, 10)
+    
+    if (!isNaN(parsedId)) {
+      try {
+        const user = await prisma.user.findUnique({
+          where: { id: parsedId }
+        })
+        
+        if (user) {
+          namaUser = user.namaLengkap || user.email.split('@')[0]
+          roleUser = user.role // Sudah berupa Enum kapital dari database (OPERATOR / OWNER)
+        }
+      } catch (error) {
+        console.error('Gagal memuat data pengguna untuk layout:', error)
+      }
     }
   }
 
   return (
     <OperatorLayoutContent initialName={namaUser} initialRole={roleUser}>
-      {/* 2. Pasang Auto-Refresh di sini (senyap di latar belakang setiap 10 detik) */}
+      {/* Auto-refresh bekerja di latar belakang untuk memperbarui data secara berkala */}
       <AutoRefresh intervalMs={10000} />
       
       {children}

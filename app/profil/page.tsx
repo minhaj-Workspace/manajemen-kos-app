@@ -32,10 +32,10 @@ async function uploadKtpAction(formData: FormData) {
 export default async function ProfilPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Proteksi Akses: Hanya Tenant (aman dari case-sensitivity)
-  if (!userId || userRole !== 'tenant') {
+  // Proteksi Akses: Menggunakan Enum 'TENANT' yang konsisten
+  if (!userId || userRole !== 'TENANT') {
     redirect('/')
   }
 
@@ -58,14 +58,14 @@ export default async function ProfilPenghuniPage() {
   if (!penghuni) redirect('/')
 
   return (
-    <div style={{ backgroundColor: '#090d16', color: '#f8fafc', minHeight: '100vh', padding: '30px', fontFamily: 'sans-serif' }}>
-      <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div style={{ backgroundColor: '#090d16', color: '#f8fafc', minHeight: '100vh', padding: '30px', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
+      <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
         
         {/* HEADER */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
           <div>
-            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>Pengaturan Akun</span>
-            <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', margin: '4px 0 6px 0' }}>Profil & Tata Tertib</h1>
+            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>TENANT SELF-SERVICE PORTAL</span>
+            <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', margin: '4px 0 6px 0' }}>⚙️ Profil & Tata Tertib Hunian</h1>
             <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>Kelola data administratif dan pelajari aturan fasilitas hunian Anda.</p>
           </div>
           <div>
@@ -75,7 +75,7 @@ export default async function ProfilPenghuniPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
           
           {/* KOLOM KIRI: DATA ADMINISTRATIF & KTP */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

@@ -2,80 +2,88 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import AutoRefresh from '@/components/AutoRefresh' 
+import AutoRefresh from '@/components/AutoRefresh'
+import { ActionButton, ConfirmForm } from '@/components/VerifikasiClientActions'
 
 // ==========================================
-// SERVER ACTIONS
+// SERVER ACTIONS (Aman & Presisi Enum)
 // ==========================================
+async function verifyAdminAccess() {
+  const cookieStore = await cookies()
+  const role = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  if (role !== 'operator' && role !== 'owner') throw new Error('Akses ditolak')
+}
 
-// 1. Setujui, Lunasi, & Serahkan Kamar
 async function setujuiDanSerahkanAction(formData: FormData) {
   'use server'
+  await verifyAdminAccess()
+  
   const invoiceId = parseInt(formData.get('invoiceId') as string)
-  const kamarIdRaw = formData.get('kamarId') as string
+  const kamarId = parseInt(formData.get('kamarId') as string)
   const kontrakId = formData.get('kontrakId') as string
 
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { 
-      status: 'Lunas',
-      tanggalBayar: new Date()
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'LUNAS', tanggalBayar: new Date() }
+    })
+
+    if (kontrakId) {
+      await tx.kontrak.update({
+        where: { id: parseInt(kontrakId) },
+        data: { status: 'AKTIF' }
+      })
+    }
+
+    if (kamarId) {
+      await tx.kamar.update({
+        where: { id: kamarId },
+        data: { status: 'TERISI' }
+      })
     }
   })
-
-  if (kontrakId) {
-    await prisma.kontrak.update({
-      where: { id: parseInt(kontrakId) },
-      data: { status: 'Aktif' }
-    })
-  }
-
-  if (kamarIdRaw) {
-    await prisma.kamar.update({
-      where: { id: parseInt(kamarIdRaw) },
-      data: { status: 'Terisi' }
-    })
-  }
 
   revalidatePath('/verifikasi')
   revalidatePath('/tagihan')
   revalidatePath('/dashboard-operator')
 }
 
-// 2. Tolak / Catat Kendala Dokumen
 async function tolakAtauBermasalahAction(formData: FormData) {
   'use server'
+  await verifyAdminAccess()
   const invoiceId = parseInt(formData.get('invoiceId') as string)
 
   await prisma.invoice.update({
     where: { id: invoiceId },
-    data: { status: 'Belum Lunas' }
+    data: { status: 'BELUM_LUNAS' }
   })
 
   revalidatePath('/verifikasi')
   revalidatePath('/tagihan')
 }
 
-// 3. Batalkan Persetujuan (Rollback jika salah klik pada arsip)
 async function batalkanPersetujuanAction(formData: FormData) {
   'use server'
+  await verifyAdminAccess()
   const invoiceId = parseInt(formData.get('invoiceId') as string)
-  const kamarIdRaw = formData.get('kamarId') as string
+  const kamarId = parseInt(formData.get('kamarId') as string)
 
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { 
-      status: 'Menunggu Verifikasi',
-      tanggalBayar: null 
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'MENUNGGU_VERIFIKASI', tanggalBayar: null }
+    })
+
+    if (kamarId) {
+      const sisaPenghuni = await tx.penghuni.count({ where: { kamarId } })
+      if (sisaPenghuni === 0) {
+        await tx.kamar.update({
+          where: { id: kamarId },
+          data: { status: 'TERSEDIA' }
+        })
+      }
     }
   })
-
-  if (kamarIdRaw) {
-    await prisma.kamar.update({
-      where: { id: parseInt(kamarIdRaw) },
-      data: { status: 'Tersedia' }
-    })
-  }
 
   revalidatePath('/verifikasi')
   revalidatePath('/tagihan')
@@ -83,69 +91,46 @@ async function batalkanPersetujuanAction(formData: FormData) {
 }
 
 // ==========================================
-// KOMPONEN UTAMA
+// KOMPONEN HALAMAN
 // ==========================================
-interface PageProps {
-  searchParams: Promise<{ search?: string }>
-}
+interface PageProps { searchParams: Promise<{ search?: string }> }
 
 export default async function VerifikasiPage({ searchParams }: PageProps) {
   const cookieStore = await cookies()
   const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
 
-  if (userRole !== 'operator' && userRole !== 'owner') {
-    redirect('/')
-  }
+  if (userRole !== 'operator' && userRole !== 'owner') redirect('/')
 
   const resolvedSearchParams = await searchParams
   const keyword = resolvedSearchParams.search || ''
 
   const searchFilter = keyword ? {
     OR: [
-      { status: { contains: keyword, mode: 'insensitive' as const } },
       { kamar: { nomorKamar: { contains: keyword, mode: 'insensitive' as const } } },
-      { kamar: { penghuni: { is: { nama: { contains: keyword, mode: 'insensitive' as const } } } } }
+      { penghuni: { nama: { contains: keyword, mode: 'insensitive' as const } } }
     ]
   } : {}
 
+  // PERBAIKAN 1: Relasi 'kontrak' dipindah ke dalam 'penghuni' (Sesuai Skema Prisma)
   const antreanPending = await prisma.invoice.findMany({
     where: { 
       AND: [
-        { status: { in: ['Belum Lunas', 'Menunggu Verifikasi', 'Pending', 'Belum Bayar'] } },
+        { status: { in: ['BELUM_LUNAS', 'MENUNGGU_VERIFIKASI'] } },
         searchFilter
       ]
     },
     include: { 
-      kamar: {
-        include: { 
-          penghuni: true,
-          kontrakList: {
-            orderBy: { createdAt: 'desc' },
-            take: 1
-          }
-        }
-      } 
+      kamar: true,
+      penghuni: { include: { kontrak: { orderBy: { createdAt: 'desc' }, take: 1 } } } 
     },
     orderBy: { createdAt: 'desc' }
   })
 
   const riwayatDisetujui = await prisma.invoice.findMany({
-    where: { 
-      AND: [
-        { status: 'Lunas' },
-        searchFilter
-      ]
-    },
+    where: { AND: [{ status: 'LUNAS' }, searchFilter] },
     include: { 
-      kamar: {
-        include: { 
-          penghuni: true,
-          kontrakList: {
-            orderBy: { createdAt: 'desc' },
-            take: 1
-          }
-        }
-      } 
+      kamar: true,
+      penghuni: true 
     },
     orderBy: { tanggalBayar: 'desc' },
     take: 10
@@ -154,151 +139,119 @@ export default async function VerifikasiPage({ searchParams }: PageProps) {
   const formatNoHpToWa = (hp?: string | null) => {
     if (!hp) return ''
     let clean = hp.replace(/\D/g, '')
-    if (clean.startsWith('0')) {
-      clean = '62' + clean.slice(1)
-    }
+    if (clean.startsWith('0')) clean = '62' + clean.slice(1)
     return clean
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', fontFamily: 'sans-serif', padding: '24px 30px', backgroundColor: '#090d16', minHeight: '100vh', color: '#f8fafc', boxSizing: 'border-box' }}>
-      
+    <main className="p-4 md:p-6 lg:p-8 min-h-screen bg-slate-950 font-sans text-slate-100 flex flex-col gap-6">
       <AutoRefresh intervalMs={8000} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #1e293b', paddingBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+      {/* HEADER HALAMAN */}
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end border-b border-slate-800 pb-5 gap-4">
         <div>
-          <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>Payment & Document Audit</span>
-          <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', margin: '4px 0 6px 0' }}>Verifikasi & Tinjau Dokumen</h1>
-          <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>
-            {keyword ? `Hasil pencarian verifikasi untuk: "${keyword}"` : 'Validasi berkas upload, tinjau KTP & bukti bayar, serta kelola pembatalan arsip secara aman.'}
-          </p>
+          <span className="text-[10px] uppercase tracking-widest text-sky-400 font-bold">Payment & Document Audit</span>
+          <h1 className="text-2xl md:text-3xl font-bold text-white mt-1 mb-2">Verifikasi & Tinjau Dokumen</h1>
+          <p className="text-sm text-slate-400 m-0">Validasi berkas upload, tinjau identitas & bukti bayar, serta kelola arsip.</p>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div className="flex items-center gap-3">
           {keyword && (
-            <a href="/verifikasi" style={{ backgroundColor: '#1e293b', color: '#38bdf8', border: '1px solid #334155', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', textDecoration: 'none', fontWeight: 'bold' }}>
-              ✕ Reset Pencarian
+            <a href="/verifikasi" className="bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 px-4 py-2 rounded-lg text-xs font-bold transition-colors">
+              ✕ Reset Filter
             </a>
           )}
-          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ textAlign: 'right' }}>
-              <p style={{ fontSize: '11px', color: '#64748b', margin: '0 0 2px 0', textTransform: 'uppercase', fontWeight: 'bold' }}>Antrean Aktif</p>
-              <p style={{ fontSize: '18px', color: '#facc15', fontWeight: 'bold', margin: 0 }}>{antreanPending.length} <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'normal' }}>Tiket</span></p>
-            </div>
+          <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg text-right shadow-sm">
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold m-0">Antrean Aktif</p>
+            <p className="text-xl font-bold text-amber-400 m-0">{antreanPending.length} <span className="text-xs font-normal text-slate-400">Tiket</span></p>
           </div>
         </div>
       </div>
 
-      <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '24px' }}>
-        <div style={{ marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '16px', fontWeight: 'bold', color: '#fff', margin: '0 0 4px 0' }}>⏳ Antrean Masuk (Validasi Dokumen & Pembayaran)</h2>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Periksa berkas unggahan KTP dan bukti transfer secara mendetail sebelum menyerahkan kunci.</p>
-        </div>
+      {/* ANTREAN MASUK */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 shadow-xl">
+        <h2 className="text-sm font-bold text-white mb-1">⏳ Antrean Verifikasi Dokumen & Pembayaran</h2>
+        <p className="text-xs text-slate-400 mb-5">Periksa berkas unggahan KTP dan bukti transfer secara mendetail sebelum menyetujui transaksi.</p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div className="flex flex-col gap-5">
           {antreanPending.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 20px', border: '1px dashed #1e293b', borderRadius: '10px' }}>
-              <p style={{ color: '#4ade80', fontSize: '14px', margin: '0 0 4px 0', fontWeight: 'bold' }}>✅ Semua antrean verifikasi sudah bersih atau sesuai pencarian!</p>
-              <p style={{ color: '#64748b', fontSize: '12px', margin: 0 }}>Tidak ada dokumen baru yang memerlukan tindakan.</p>
+            <div className="text-center p-10 border border-dashed border-slate-800 rounded-xl">
+              <p className="text-sm font-bold text-emerald-400 m-0 mb-1">✅ Semua antrean verifikasi sudah bersih!</p>
+              <p className="text-xs text-slate-500 m-0">Tidak ada dokumen baru yang memerlukan tindakan.</p>
             </div>
           ) : (
             antreanPending.map((inv) => {
-              // PERBAIKAN: Gunakan optional chaining (?.) untuk menghindari error jika data kamar telah dihapus
-              const penghuni = inv.kamar?.penghuni
-              const kontrak = inv.kamar?.kontrakList[0]
-
+              const penghuni = inv.penghuni
+              const kontrak = inv.penghuni?.kontrak?.[0] // Mengambil kontrak dari penghuni
               const waNum = formatNoHpToWa(penghuni?.nomorHp)
-              const nomorKamarTeks = inv.kamar?.nomorKamar || '[Kamar Arsip]'
-              const waText = encodeURIComponent(`Halo Kak ${penghuni?.nama || 'Penyewa'}, terkait pembayaran sewa Kamar ${nomorKamarTeks} sebesar Rp ${inv.jumlah.toLocaleString('id-ID')}, berkas/bukti transfer Anda sedang kami tinjau.`)
+              const waText = encodeURIComponent(`Halo Kak ${penghuni?.nama || 'Penyewa'}, terkait pembayaran INV-${inv.id.toString().padStart(4, '0')} sebesar Rp ${inv.jumlah.toLocaleString('id-ID')}, berkas Anda sedang kami tinjau.`)
               const waLink = waNum ? `https://wa.me/${waNum}?text=${waText}` : ''
 
               return (
-                <div key={inv.id} style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div key={inv.id} className="bg-slate-950 border border-slate-800 rounded-xl p-5 flex flex-col gap-4 shadow-sm hover:border-slate-700 transition-colors">
                   
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                    <h3 style={{ margin: 0, color: '#fff', fontSize: '16px', fontWeight: '600' }}>
-                      Kamar {nomorKamarTeks} <span style={{ fontSize: '13px', color: '#38bdf8', fontWeight: 'normal' }}>({inv.kamar?.tipe || '-'})</span>
-                    </h3>
-                    <span style={{ backgroundColor: 'rgba(250, 204, 21, 0.1)', color: '#facc15', border: '1px solid rgba(250, 204, 21, 0.2)', padding: '2px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>
-                      {inv.status}
+                  {/* Info Utama */}
+                  <div className="flex flex-col md:flex-row md:justify-between md:items-center border-b border-slate-800 pb-4 gap-3">
+                    <div>
+                      <h3 className="m-0 text-base font-bold text-white flex items-center gap-2">
+                        Kamar {inv.kamar?.nomorKamar || '-'} <span className="text-xs text-sky-400 font-normal">({inv.kamar?.tipe || 'Tipe Umum'})</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 m-0 mt-1">INV-{inv.id.toString().padStart(4, '0')} • Penghuni: <strong className="text-slate-200">{penghuni?.nama || 'Tanpa Nama'}</strong></p>
+                    </div>
+                    <span className="bg-amber-900/20 text-amber-500 border border-amber-800/50 px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase w-fit">
+                      {inv.status.replace('_', ' ')}
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px', fontSize: '13px' }}>
-                    <div>
-                      <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>Nama Penghuni:</p>
-                      <p style={{ margin: 0, fontWeight: '600', color: '#fff' }}>{penghuni?.nama || 'Belum diisi'}</p>
-                    </div>
-                    <div>
-                      <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>WhatsApp / NIK:</p>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ color: '#fff', fontWeight: '600' }}>{penghuni?.nomorHp || '-'}</span>
-                        {waLink && (
-                          <a href={waLink} target="_blank" rel="noreferrer" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textDecoration: 'none' }}>
-                            💬 Chat WA
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>Nominal Tagihan:</p>
-                      <p style={{ margin: 0, fontWeight: 'bold', color: '#4ade80', fontSize: '15px' }}>Rp {inv.jumlah.toLocaleString('id-ID')}</p>
-                    </div>
-                  </div>
-
-                  <div style={{ backgroundColor: '#0f172a', padding: '16px', borderRadius: '10px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <p style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', color: '#facc15' }}>📁 Berkas & Dokumen Terlampir untuk Ditinjau:</p>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px' }}>
-                      <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {/* Panel Berkas */}
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex flex-col gap-3">
+                    <p className="m-0 text-xs font-bold text-amber-400 tracking-wider uppercase">📁 Dokumen Lampiran</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center">
                         <div>
-                          <p style={{ margin: '0 0 2px 0', fontSize: '12px', color: '#94a3b8' }}>Scan KTP / Identitas</p>
-                          <p style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>{penghuni?.nik ? `NIK: ${penghuni.nik}` : 'Belum Diunggah'}</p>
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest m-0 mb-1">Scan KTP</p>
+                          <p className="text-xs font-bold text-white m-0">{penghuni?.nik ? `NIK: ${penghuni.nik}` : 'Belum Diunggah'}</p>
                         </div>
                         {penghuni?.fotoKtp ? (
-                          <a href={penghuni.fotoKtp} target="_blank" rel="noreferrer" style={{ backgroundColor: '#1e293b', color: '#38bdf8', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', textDecoration: 'none', fontWeight: 'bold' }}>
-                            🔍 Tinjau KTP
-                          </a>
-                        ) : (
-                          <span style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>Tidak Ada Berkas</span>
-                        )}
+                          <a href={penghuni.fotoKtp} target="_blank" rel="noreferrer" className="bg-slate-800 hover:bg-slate-700 text-sky-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">🔍 Tinjau</a>
+                        ) : <span className="text-[10px] text-slate-500 italic">Kosong</span>}
                       </div>
-
-                      <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center">
                         <div>
-                          <p style={{ margin: '0 0 2px 0', fontSize: '12px', color: '#94a3b8' }}>Bukti Pembayaran / Transfer</p>
-                          <p style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', color: '#4ade80' }}>Rp {inv.jumlah.toLocaleString('id-ID')}</p>
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest m-0 mb-1">Bukti Transfer</p>
+                          <p className="text-xs font-bold text-emerald-400 m-0">Rp {inv.jumlah.toLocaleString('id-ID')}</p>
                         </div>
-                        {inv.buktiBayarUrl ? (
-                          <a href={inv.buktiBayarUrl} target="_blank" rel="noreferrer" style={{ backgroundColor: '#1e293b', color: '#4ade80', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', textDecoration: 'none', fontWeight: 'bold' }}>
-                            🔍 Tinjau Bukti
-                          </a>
-                        ) : (
-                          <span style={{ fontSize: '12px', color: '#38bdf8', fontWeight: '500' }}>Validasi Manual</span>
-                        )}
+                        {(inv as any).buktiBayarUrl ? (
+                          <a href={(inv as any).buktiBayarUrl} target="_blank" rel="noreferrer" className="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">🔍 Bukti</a>
+                        ) : <span className="text-[10px] text-slate-500 italic">Validasi Manual</span>}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '10px', borderTop: '1px solid #1e293b' }}>
-                    <form action={tolakAtauBermasalahAction} style={{ margin: 0 }}>
-                      <input type="hidden" name="invoiceId" value={inv.id} />
-                      <button type="submit" style={{ backgroundColor: 'transparent', border: '1px solid #f87171', color: '#f87171', padding: '10px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}>
-                        ⚠️ Tolak / Dokumen Bermasalah
-                      </button>
-                    </form>
-
-                    {/* Fallback string kosong jika null agar tidak error Type 'number | null' */}
-                    {kontrak && (
-                      <form action={setujuiDanSerahkanAction} style={{ margin: 0 }}>
-                        <input type="hidden" name="invoiceId" value={inv.id} />
-                        <input type="hidden" name="kamarId" value={inv.kamarId || ''} />
-                        <input type="hidden" name="kontrakId" value={kontrak.id} />
-                        <button type="submit" style={{ backgroundColor: '#4ade80', color: '#090d16', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}>
-                          ✅ Setujui, Lunasi & Serahkan Kunci Kamar
-                        </button>
-                      </form>
+                  {/* Aksi Keputusan */}
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2">
+                    {waLink && (
+                      <a href={waLink} target="_blank" rel="noreferrer" className="bg-emerald-900/20 text-emerald-400 border border-emerald-800/30 px-3 py-2 rounded-lg text-xs font-bold w-full sm:w-auto text-center hover:bg-emerald-900/40 transition-colors">
+                        💬 Hubungi Penyewa via WA
+                      </a>
                     )}
+                    
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      {/* PERBAIKAN 2: Menggunakan type="submit" yang valid dan variant untuk warna */}
+                      <ConfirmForm actionFn={tolakAtauBermasalahAction} confirmMsg="Yakin menolak bukti ini dan mereset tagihan ke status Belum Lunas?">
+                        <input type="hidden" name="invoiceId" value={inv.id} />
+                        <ActionButton type="submit" variant="danger" text="⚠️ Tolak Berkas" pendingText="Menolak..." />
+                      </ConfirmForm>
+
+                      {kontrak && (
+                        <form action={setujuiDanSerahkanAction} className="m-0">
+                          <input type="hidden" name="invoiceId" value={inv.id} />
+                          <input type="hidden" name="kamarId" value={inv.kamarId?.toString() || ''} />
+                          <input type="hidden" name="kontrakId" value={kontrak.id} />
+                          <ActionButton type="submit" variant="success" text="✅ Setujui & LUNAS" pendingText="Memproses..." />
+                        </form>
+                      )}
+                    </div>
                   </div>
 
                 </div>
@@ -308,85 +261,58 @@ export default async function VerifikasiPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '24px' }}>
-        <div style={{ marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '16px', fontWeight: 'bold', color: '#fff', margin: '0 0 4px 0' }}>📚 Arsip Riwayat & Pembatalan Persetujuan ({riwayatDisetujui.length})</h2>
-          <p style={{ fontSize: '13px', color: '#64748b', margin: 0 }}>Daftar kamar yang telah disetujui. Anda dapat membuka detail arsip atau membatalkan persetujuan jika terjadi kesalahan.</p>
-        </div>
+      {/* ARSIP RIWAYAT & PEMBATALAN */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 shadow-xl">
+        <h2 className="text-sm font-bold text-white mb-1">📚 Arsip Persetujuan Terbaru</h2>
+        <p className="text-xs text-slate-400 mb-5">Daftar transaksi yang telah disetujui. Anda dapat membatalkan persetujuan jika terjadi human error.</p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="flex flex-col gap-3">
           {riwayatDisetujui.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '30px 20px', border: '1px dashed #1e293b', borderRadius: '10px' }}>
-              <p style={{ color: '#64748b', fontSize: '13px', margin: 0 }}>Belum ada riwayat persetujuan di dalam arsip atau yang cocok dengan pencarian.</p>
+            <div className="text-center p-6 border border-dashed border-slate-800 rounded-xl">
+              <p className="text-xs text-slate-500 m-0">Belum ada riwayat persetujuan di dalam arsip.</p>
             </div>
           ) : (
-            riwayatDisetujui.map((inv) => {
-              const penghuni = inv.kamar?.penghuni
-              const waNum = formatNoHpToWa(penghuni?.nomorHp)
-              const nomorKamarTeks = inv.kamar?.nomorKamar || '[Kamar Arsip]'
-              const waText = encodeURIComponent(`Halo Kak ${penghuni?.nama || 'Penyewa'}, pembayaran sewa Kamar ${nomorKamarTeks} telah kami verifikasi lunas. Terima kasih!`)
-              const waLink = waNum ? `https://wa.me/${waNum}?text=${waText}` : ''
-
-              return (
-                <details key={inv.id} style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px 20px', color: '#fff', cursor: 'pointer' }}>
-                  <summary style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', outline: 'none', flexWrap: 'wrap', gap: '8px' }}>
-                    <div>
-                      <h4 style={{ margin: '0 0 4px 0', color: '#fff', fontSize: '14px', display: 'inline-block' }}>
-                        Kamar {nomorKamarTeks} - <span style={{ color: '#4ade80' }}>{penghuni?.nama || 'Penghuni'}</span>
-                      </h4>
-                      <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>
-                        Nominal: Rp {inv.jumlah.toLocaleString('id-ID')} • Lunas pada: {inv.tanggalBayar ? new Date(inv.tanggalBayar).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
-                      </p>
-                    </div>
-                    <span style={{ backgroundColor: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', border: '1px solid rgba(74, 222, 128, 0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>
-                      🔍 Buka Arsip & Opsi Edit
-                    </span>
-                  </summary>
-
-                  <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px', color: '#94a3b8' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                      <div>
-                        <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>Nomor WhatsApp:</p>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span style={{ color: '#fff', fontWeight: '600' }}>{penghuni?.nomorHp || '-'}</span>
-                          {waLink && (
-                            <a href={waLink} target="_blank" rel="noreferrer" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', textDecoration: 'none' }}>
-                              💬 Chat WA
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>Nomor KTP (NIK):</p>
-                        <p style={{ margin: 0, fontWeight: '600', color: '#fff' }}>{penghuni?.nik || '-'}</p>
-                      </div>
-                      <div>
-                        <p style={{ margin: '0 0 2px 0', color: '#64748b' }}>Status Kamar:</p>
-                        <p style={{ margin: 0, fontWeight: '600', color: '#4ade80' }}>Terisi (Aktif)</p>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '12px 16px', borderRadius: '8px', border: '1px solid #1e293b', marginTop: '6px', flexWrap: 'wrap', gap: '12px' }}>
-                      <span style={{ fontSize: '12px', color: '#facc15' }}>⚠️ Perhatian: Jika persetujuan ini dilakukan karena salah klik, Anda dapat membatalkannya kembali ke antrean verifikasi.</span>
-                      
-                      <form action={batalkanPersetujuanAction} style={{ margin: 0 }}>
-                        <input type="hidden" name="invoiceId" value={inv.id} />
-                        {/* Fallback string kosong untuk mencegah error tipe data */}
-                        <input type="hidden" name="kamarId" value={inv.kamarId || ''} />
-                        <button type="submit" style={{ backgroundColor: 'transparent', border: '1px solid #f87171', color: '#f87171', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-                          Batalkan Persetujuan
-                        </button>
-                      </form>
-                    </div>
-
+            riwayatDisetujui.map((inv) => (
+              <details key={inv.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-white group cursor-pointer hover:border-slate-700 transition-colors">
+                <summary className="flex flex-col sm:flex-row justify-between sm:items-center outline-none gap-3">
+                  <div>
+                    <h4 className="m-0 text-sm font-bold text-white flex items-center gap-2">
+                      Kamar {inv.kamar?.nomorKamar || '-'} <span className="text-emerald-400 font-normal">({inv.penghuni?.nama || 'Tanpa Nama'})</span>
+                    </h4>
+                    <p className="text-xs text-slate-400 m-0 mt-1">
+                      Rp {inv.jumlah.toLocaleString('id-ID')} • Lunas: {inv.tanggalBayar ? new Date(inv.tanggalBayar).toLocaleDateString('id-ID') : '-'}
+                    </p>
                   </div>
-                </details>
-              )
-            })
+                  <span className="bg-slate-900 text-sky-400 border border-slate-800 px-3 py-1.5 rounded-lg text-[10px] font-bold group-open:bg-sky-900/30 transition-colors w-fit">
+                    Lihat Detail
+                  </span>
+                </summary>
+
+                <div className="mt-4 pt-4 border-t border-slate-800 flex flex-col md:flex-row justify-between md:items-end gap-4 cursor-auto">
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <p className="text-slate-500 m-0 mb-1">ID Tagihan</p>
+                      <p className="font-bold text-slate-300 m-0">INV-{inv.id.toString().padStart(4, '0')}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-500 m-0 mb-1">Status Kamar</p>
+                      <p className="font-bold text-emerald-400 m-0">Terisi (Aktif)</p>
+                    </div>
+                  </div>
+                  
+                  {/* PERBAIKAN 2: Menggunakan type="submit" yang valid */}
+                  <ConfirmForm actionFn={batalkanPersetujuanAction} confirmMsg="Yakin ingin membatalkan persetujuan ini? Tagihan akan kembali ke Antrean Verifikasi.">
+                    <input type="hidden" name="invoiceId" value={inv.id} />
+                    <input type="hidden" name="kamarId" value={inv.kamarId?.toString() || ''} />
+                    <ActionButton type="submit" variant="warning" text="Batalkan Persetujuan (Rollback)" pendingText="Membatalkan..." />
+                  </ConfirmForm>
+                </div>
+              </details>
+            ))
           )}
         </div>
       </div>
 
-    </div>
+    </main>
   )
 }

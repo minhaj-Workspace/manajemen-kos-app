@@ -12,15 +12,15 @@ export default async function HomePage() {
     redirect('/login')
   }
 
-  // Normalisasi role ke lowercase untuk menghindari error perbedaan huruf besar/kecil
-  const normalizedRole = userRole.trim().toLowerCase()
+  // Normalisasi role ke uppercase untuk keselarasan dengan Enum Global
+  const normalizedRole = userRole.trim().toUpperCase()
 
   // Pengalihan otomatis berdasarkan peran (Operator & Owner digabung ke dashboard operator)
-  if (normalizedRole === 'operator' || normalizedRole === 'owner') {
+  if (normalizedRole === 'OPERATOR' || normalizedRole === 'OWNER') {
     redirect('/dashboard-operator') 
   }
 
-  if (normalizedRole === 'tenant' || normalizedRole === 'penghuni') {
+  if (normalizedRole === 'TENANT') {
     redirect('/portal-penghuni')
   }
 

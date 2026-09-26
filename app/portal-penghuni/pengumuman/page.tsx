@@ -5,10 +5,10 @@ import { redirect } from 'next/navigation'
 export default async function PengumumanPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Proteksi Akses: Hanya Tenant
-  if (!userId || userRole !== 'tenant') redirect('/')
+  // Proteksi Akses: Menggunakan Enum 'TENANT' yang konsisten
+  if (!userId || userRole !== 'TENANT') redirect('/')
   const idUser = parseInt(userId, 10)
 
   const penghuni = await prisma.penghuni.findUnique({

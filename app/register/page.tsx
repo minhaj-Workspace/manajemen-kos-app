@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation'
 import bcrypt from 'bcryptjs'
 import Link from 'next/link'
 
-// Server Action untuk memproses registrasi
+// ==========================================
+// SERVER ACTION: REGISTRASI AKUN BARU
+// ==========================================
 async function registerUserAction(formData: FormData) {
   'use server'
   const email = formData.get('email') as string
@@ -23,12 +25,12 @@ async function registerUserAction(formData: FormData) {
   // Enkripsi kata sandi
   const hashedPassword = await bcrypt.hash(password, 10)
 
-  // Buat akun dengan role default 'Tenant' (Calon Penghuni)
+  // Buat akun dengan role Enum mutakhir 'TENANT' (Calon Penghuni)
   await prisma.user.create({
     data: {
       email,
       password: hashedPassword,
-      role: 'Tenant'
+      role: 'TENANT' // Enum Mutakhir
     }
   })
 
@@ -36,6 +38,9 @@ async function registerUserAction(formData: FormData) {
   redirect('/login')
 }
 
+// ==========================================
+// KOMPONEN HALAMAN REGISTRASI
+// ==========================================
 export default function RegisterPage() {
   return (
     <main style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a202c', fontFamily: 'sans-serif' }}>
@@ -52,7 +57,7 @@ export default function RegisterPage() {
               type="email" 
               name="email" 
               required 
-              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #4a5568', backgroundColor: '#1a202c', color: '#fff', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #4a5568', backgroundColor: '#1a202c', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
             />
           </div>
 
@@ -63,7 +68,7 @@ export default function RegisterPage() {
               name="password" 
               required 
               minLength={6}
-              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #4a5568', backgroundColor: '#1a202c', color: '#fff', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #4a5568', backgroundColor: '#1a202c', color: '#fff', boxSizing: 'border-box', outline: 'none' }}
             />
           </div>
 

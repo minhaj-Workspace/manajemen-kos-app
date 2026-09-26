@@ -21,6 +21,7 @@ export default function OperatorLayoutContent({
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
+  // Menutup dropdown profil jika pengguna mengklik di luar area
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -31,6 +32,7 @@ export default function OperatorLayoutContent({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // Fungsi pengatur gaya menu aktif secara dinamis
   const getMenuStyle = (path: string) => {
     const isActive = pathname === path
     return {
@@ -48,6 +50,7 @@ export default function OperatorLayoutContent({
     }
   }
 
+  // Aksi submit pencarian global
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!searchQuery.trim()) return
@@ -65,7 +68,7 @@ export default function OperatorLayoutContent({
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif' }}>
       
-      {/* SIDEBAR */}
+      {/* SIDEBAR UTAMA */}
       <aside style={{ width: '260px', backgroundColor: '#090d16', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
         <div style={{ padding: '28px 24px', borderBottom: '1px solid #1e293b' }}>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#fff', margin: 0 }}>
@@ -73,7 +76,7 @@ export default function OperatorLayoutContent({
           </h2>
         </div>
 
-        {/* DAFTAR MENU NAVIGASI UTAMA */}
+        {/* DAFTAR MENU NAVIGASI (PERBAIKAN: Mengarahkan ke /dashboard-operator) */}
         <nav style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, overflowY: 'auto' }}>
           <Link href="/dashboard-operator" style={getMenuStyle('/dashboard-operator')}>⊞ Dashboard</Link>
           <Link href="/penghuni" style={getMenuStyle('/penghuni')}>👥 Kelola Penghuni</Link>
@@ -84,7 +87,7 @@ export default function OperatorLayoutContent({
           <Link href="/maintenance" style={getMenuStyle('/maintenance')}>🛠️ Maintenance</Link>
         </nav>
 
-        {/* ⚙️ PROFIL & POPUP DROPDOWN INTERAKTIF */}
+        {/* PROFIL & POPUP DROPDOWN */}
         <div ref={menuRef} style={{ padding: '16px', borderTop: '1px solid #1e293b', position: 'relative' }}>
           
           {isMenuOpen && (
@@ -105,13 +108,13 @@ export default function OperatorLayoutContent({
             }}>
               <div style={{ padding: '10px 12px', borderBottom: '1px solid #1e293b', marginBottom: '4px' }}>
                 <p style={{ margin: '0 0 2px 0', fontSize: '13px', fontWeight: 'bold', color: '#fff' }}>{initialName}</p>
-                <p style={{ margin: 0, fontSize: '11px', color: '#38bdf8' }}>{initialRole} (PRO)</p>
+                <p style={{ margin: 0, fontSize: '11px', color: '#38bdf8' }}>{initialRole}</p>
               </div>
 
               <Link 
                 href="/settings" 
                 onClick={() => setIsMenuOpen(false)}
-                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '6px', color: '#cbd5e1', textDecoration: 'none', fontSize: '13px', transition: 'background 0.2s' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '6px', color: '#cbd5e1', textDecoration: 'none', fontSize: '13px' }}
               >
                 <span>⚙️</span> Pengaturan Sistem
               </Link>
@@ -160,7 +163,7 @@ export default function OperatorLayoutContent({
         </div>
       </aside>
 
-      {/* KONTEN UTAMA */}
+      {/* AREA KONTEN UTAMA */}
       <div style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b' }}>
         
         <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px', position: 'sticky', top: 0, zIndex: 9 }}>

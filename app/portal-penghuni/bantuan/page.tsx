@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 // ==========================================
-// SERVER ACTION: AJUKAN TIKET PRO
+// SERVER ACTION (Enum Mutakhir: PENDING)
 // ==========================================
 async function ajukanTiketAction(formData: FormData) {
   'use server'
@@ -21,8 +21,8 @@ async function ajukanTiketAction(formData: FormData) {
     data: { 
       kamarId: parseInt(kamarId, 10), 
       deskripsi: deskripsiLengkap, 
-      status: 'Open', // Diselaraskan dengan status default Kanban operator
-      tanggungJawab: 'Pengelola', // Default awal ditanggung pengelola sebelum ditinjau
+      status: 'PENDING', // Enum Mutakhir (Menyesuaikan Kanban Operator)
+      tanggungJawab: 'Pengelola', 
       ...(fotoUrl ? { fotoUrl } : {})
     }
   })
@@ -32,14 +32,15 @@ async function ajukanTiketAction(formData: FormData) {
 }
 
 // ==========================================
-// KOMPONEN UTAMA
+// KOMPONEN UTAMA BANTUAN PENGHUNI
 // ==========================================
 export default async function BantuanPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userId || userRole !== 'tenant') redirect('/')
+  // Validasi role dengan Enum 'TENANT'
+  if (!userId || userRole !== 'TENANT') redirect('/')
 
   const penghuni = await prisma.penghuni.findUnique({
     where: { userId: parseInt(userId, 10) },
@@ -56,20 +57,20 @@ export default async function BantuanPenghuniPage() {
     })
   }
 
-  // Helper Warna Status Sesuai Kanban Operator (Mendukung Open, Triaged, In Progress, Resolved)
+  // Helper Warna Status (Mendukung status operasional Kanban)
   const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'resolved':
-      case 'selesai':
+    switch (status.toUpperCase()) {
+      case 'SELESAI':
+      case 'RESOLVED':
         return { bg: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.3)', label: '✅ Selesai Dikerjakan' }
-      case 'in progress':
-      case 'proses':
-      case 'dalam perbaikan':
+      case 'IN_PROGRESS':
+      case 'PROSES':
         return { bg: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: 'rgba(56, 189, 248, 0.3)', label: '🛠️ Sedang Ditangani Teknisi' }
-      case 'triaged':
+      case 'DISEPAKATI':
+      case 'TRIAGED':
         return { bg: 'rgba(96, 165, 250, 0.1)', color: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)', label: '🔍 Ditinjau Operator' }
       default:
-        return { bg: 'rgba(250, 204, 21, 0.1)', color: '#facc15', border: 'rgba(250, 204, 21, 0.3)', label: '⏳ Menunggu Antrean (Open)' }
+        return { bg: 'rgba(250, 204, 21, 0.1)', color: '#facc15', border: 'rgba(250, 204, 21, 0.3)', label: '⏳ Menunggu Antrean (Pending)' }
     }
   }
 
@@ -175,7 +176,7 @@ export default async function BantuanPenghuniPage() {
 
                     <p style={{ margin: 0, color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5' }}>{t.deskripsi}</p>
 
-                    {/* METRIK INTEGRASI OPERATOR (ESTIMASI BIAYA & KEBIJAKAN TANGGUNG JAWAB) */}
+                    {/* METRIK INTEGRASI OPERATOR */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' }}>
                       <span style={{ color: '#94a3b8' }}>
                         Diajukan: {t.createdAt ? new Date(t.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-'}

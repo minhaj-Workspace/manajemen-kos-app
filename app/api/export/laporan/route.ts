@@ -5,27 +5,30 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const daftarInvoice = await prisma.invoice.findMany({
+    // Ambil data invoice dengan relasi lengkap ke kamar dan penghuni
+    const invoicesEnterprise = await prisma.invoice.findMany({
       include: {
-        kamar: {
-          include: { penghuni: true }
-        }
+        kamar: true,
+        penghuni: true
       },
       orderBy: { jatuhTempo: 'desc' }
     })
 
-    let csvContent = 'ID Tagihan,Nomor Kamar,Nama Penghuni,Jumlah (Rp),Status,Tanggal Jatuh Tempo,Tanggal Bayar\n'
+    // Tambahkan BOM (\uFEFF) di awal agar Excel Windows membaca UTF-8 dengan benar
+    let csvContent = '\uFEFFID Tagihan,Nomor Kamar,Nama Penghuni,Jumlah (Rp),Status,Tanggal Jatuh Tempo,Tanggal Bayar\n'
 
-    daftarInvoice.forEach((inv) => {
+    invoicesEnterprise.forEach((inv) => {
       const nomorKamar = inv.kamar?.nomorKamar || '-'
-      const namaPenghuni = inv.kamar?.penghuni?.nama || 'Kosong'
+      const namaPenghuni = inv.penghuni?.nama || 'Tanpa Nama'
       const jatuhTempo = inv.jatuhTempo ? new Date(inv.jatuhTempo).toLocaleDateString('id-ID') : '-'
       const tanggalBayar = inv.tanggalBayar ? new Date(inv.tanggalBayar).toLocaleDateString('id-ID') : '-'
+      const statusBersih = inv.status.replace('_', ' ')
       
-      csvContent += `${inv.id},"${nomorKamar}","${namaPenghuni}",${inv.jumlah},"${inv.status}","${jatuhTempo}","${tanggalBayar}"\n`
+      csvContent += `${inv.id},"${nomorKamar}","${namaPenghuni}",${inv.jumlah},"${statusBersih}","${jatuhTempo}","${tanggalBayar}"\n`
     })
 
     const tanggalHariIni = new Date().toISOString().split('T')[0]
+    
     return new NextResponse(csvContent, {
       status: 200,
       headers: {

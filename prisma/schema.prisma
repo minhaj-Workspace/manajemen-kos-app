@@ -3,153 +3,231 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  password     String
-  role         String   @default("Tenant") // "Owner", "Operator", "Tenant"
-  
-  namaLengkap  String?
-  nomorHp      String?
-  fotoProfil   String?  
+// ================= ENUMS =================
+enum RoleType {
+  OWNER
+  OPERATOR
+  TENANT
+}
 
-  createdAt    DateTime @default(now())
+enum StatusKamar {
+  TERSEDIA
+  BOOKING
+  TERISI
+}
+
+enum StatusKontrak {
+  PENDING
+  AKTIF
+  SELESAI
+}
+
+enum StatusInvoice {
+  BELUM_LUNAS
+  MENUNGGU_VERIFIKASI
+  LUNAS
+}
+
+enum StatusMaintenance {
+  PENDING
+  DIPROSES
+  SELESAI
+  RESOLVED
+}
+
+enum StatusPersetujuan {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ================= MODELS =================
+
+model User {
+  id               Int      @id @default(autoincrement())
+  email            String   @unique
+  password         String
+  role             RoleType @default(TENANT)
+  
+  namaLengkap      String?
+  nomorHp          String?
+  fotoProfil       String?  
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt 
 
   penghuni         Penghuni? 
-  persetujuanRoles PersetujuanRole[]
+  persetujuanRoles PersetujuanRole[] @relation("UserTarget")
+  requestedRoles   PersetujuanRole[] @relation("RoleRequester")
+  pengeluaran      Pengeluaran[]     // FITUR BARU: Melacak siapa yang mencatat pengeluaran
 }
 
 model Kamar {
-  id           Int           @id @default(autoincrement())
-  nomorKamar   String        @unique
+  id           Int         @id @default(autoincrement())
+  nomorKamar   String      @unique
   tipe         String
   harga        Float
-  status       String        @default("Tersedia") // "Tersedia", "Booking", "Terisi"
+  status       StatusKamar @default(TERSEDIA) 
   
-  penghuni     Penghuni?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @default(now()) @updatedAt
+  
+  penghuni     Penghuni[]  
   invoices     Invoice[]
   maintenances Maintenance[]
-  kontrakList  Kontrak[]     
+  kontrakList  Kontrak[]      
 }
 
 model Penghuni {
-  id           Int      @id @default(autoincrement())
-  nama         String
-  nomorHp      String
-  tanggalMasuk DateTime @default(now())
+  id                Int      @id @default(autoincrement())
+  nama              String
+  nomorHp           String
+  tanggalMasuk      DateTime @default(now())
   
-  nik          String?  
-  fotoKtp      String?  
+  nik               String?  
+  fotoKtp           String?  
   
-  userId       Int?     @unique
-  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // FITUR BARU: Penanda tagihan (siapa penanggung jawab kamar jika dihuni >1 orang)
+  isAkunUtama       Boolean  @default(false)
 
-  // Opsional agar bisa melakukan Soft Check-out (lepas dari kamar)
-  kamarId      Int?     @unique
-  kamar        Kamar?   @relation(fields: [kamarId], references: [id], onDelete: Restrict)
+  userId            Int?     @unique
+  user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  kontrak            Kontrak[]
+  kamarId           Int?     
+  kamar             Kamar?   @relation(fields: [kamarId], references: [id], onDelete: Restrict)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @default(now()) @updatedAt
+
+  kontrak           Kontrak[]
+  invoices          Invoice[]           // FITUR BARU: Relasi langsung ke tagihan
   persetujuanBerkas PersetujuanBerkas[]
 }
 
 model Kontrak {
-  id           Int      @id @default(autoincrement())
+  id           Int           @id @default(autoincrement())
   
   kamarId      Int
-  kamar        Kamar    @relation(fields: [kamarId], references: [id], onDelete: Cascade)
+  kamar        Kamar         @relation(fields: [kamarId], references: [id], onDelete: Restrict) 
   
   penghuniId   Int
-  penghuni     Penghuni @relation(fields: [penghuniId], references: [id], onDelete: Cascade)
+  penghuni     Penghuni      @relation(fields: [penghuniId], references: [id], onDelete: Restrict) 
   
   tanggalMulai DateTime
   durasiBulan  Int
-  status       String   @default("Pending") // "Pending", "Aktif", "Selesai"
-  createdAt    DateTime @default(now())
+  status       StatusKontrak @default(PENDING) 
+  
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @default(now()) @updatedAt
 
   invoices     Invoice[]
 }
 
 model Invoice {
-  id            Int       @id @default(autoincrement())
+  id               Int           @id @default(autoincrement())
   
-  kamarId       Int?
-  kamar         Kamar?    @relation(fields: [kamarId], references: [id], onDelete: SetNull)
+  kamarId          Int?
+  kamar            Kamar?        @relation(fields: [kamarId], references: [id], onDelete: SetNull)
 
-  kontrakId     Int?
-  kontrak       Kontrak?  @relation(fields: [kontrakId], references: [id], onDelete: SetNull)
+  kontrakId        Int?
+  kontrak          Kontrak?      @relation(fields: [kontrakId], references: [id], onDelete: SetNull)
 
-  jumlah        Float
-  jatuhTempo    DateTime
-  status        String    @default("Belum Lunas") // "Belum Lunas", "Menunggu Verifikasi", "Lunas"
-  tanggalBayar  DateTime? 
-  createdAt     DateTime  @default(now())
+  // FITUR BARU: Menjaga tagihan tetap tertaut pada orangnya meski pindah/keluar
+  penghuniId       Int?
+  penghuni         Penghuni?     @relation(fields: [penghuniId], references: [id], onDelete: SetNull)
 
-  buktiBayarUrl String?   
+  jumlah           Float
+  jatuhTempo       DateTime
+  status           StatusInvoice @default(BELUM_LUNAS) 
+  tanggalBayar     DateTime? 
+  
+  metodePembayaran String?       // FITUR BARU: Contoh "Transfer BCA", "Tunai"
+  buktiBayarUrl    String?   
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @default(now()) @updatedAt
 }
 
 model Maintenance {
-  id            Int      @id @default(autoincrement())
-  kamarId       Int
-  kamar         Kamar    @relation(fields: [kamarId], references: [id], onDelete: Cascade)
+  id            Int               @id @default(autoincrement())
+  kamarId       Int?              // PERBAIKAN: Dibuat opsional (Int?) agar bisa menggunakan SetNull
+  kamar         Kamar?            @relation(fields: [kamarId], references: [id], onDelete: SetNull) // PERBAIKAN: Mencegah kehilangan jejak audit keuangan
   
-  kategori      String   @default("Lainnya") 
+  kategori      String            @default("Lainnya") 
   deskripsi     String   
   fotoUrl       String?  
   
-  status        String   @default("Pending") // "Pending", "Diproses", "Selesai", "Resolved"
-  createdAt     DateTime @default(now())
-
+  status        StatusMaintenance @default(PENDING) 
   estimasiBiaya Float?   
+  tanggungJawab String            @default("Pengelola") 
   
-  // STANDAR ENTERPRISE: 
-  // "Pengelola" (Beban Kas Kos) atau "Tenant" (Ditagihkan ke Penghuni jadi Invoice)
-  tanggungJawab String   @default("Pengelola") 
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @default(now()) @updatedAt
 }
 
 model Pengeluaran {
-  id          Int      @id @default(autoincrement())
-  kategori    String   // "Operasional", "Maintenance", "Prive Owner", "Lainnya"
-  jumlah      Float
-  keterangan  String?
-  tanggal     DateTime @default(now())
-  createdAt   DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  kategori      String   
+  jumlah        Float
+  keterangan    String?
+  tanggal       DateTime @default(now())
+  
+  // FITUR BARU: Jejak Audit (Dicatat oleh siapa?)
+  dicatatOlehId Int?
+  pencatat      User?    @relation(fields: [dicatatOlehId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
 }
 
 model Pengumuman {
-  id          Int      @id @default(autoincrement())
-  judul       String
-  kategori    String   @default("Umum") // "Maintenance", "Keuangan", "Umum"
-  prioritas   String   @default("Informasi") // "Penting", "Informasi"
-  isi         String
-  createdAt   DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  judul     String
+  kategori  String   @default("Umum")
+  prioritas String   @default("Informasi")
+  isi       String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model Setting {
   id        Int      @id @default(autoincrement())
   key       String   @unique 
   value     String   
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model PersetujuanRole {
-  id          Int      @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
+  
   userId      Int      
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  targetRole  String   // "Owner", "Operator", "Tenant"
-  requestedBy Int      // ID Operator yang mengajukan
-  status      String   @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
-  createdAt   DateTime @default(now())
+  user        User              @relation("UserTarget", fields: [userId], references: [id], onDelete: Cascade)
+  
+  targetRole  RoleType          
+  
+  requestedBy Int               
+  requester   User              @relation("RoleRequester", fields: [requestedBy], references: [id])
+  
+  status      StatusPersetujuan @default(PENDING) 
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @default(now()) @updatedAt
 }
 
 model PersetujuanBerkas {
-  id          Int      @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   penghuniId  Int
-  penghuni    Penghuni @relation(fields: [penghuniId], references: [id], onDelete: Cascade)
-  fotoKtpBaru String   // URL file KTP baru yang diajukan
-  status      String   @default("PENDING") // "PENDING", "APPROVED", "REJECTED"
-  createdAt   DateTime @default(now())
+  penghuni    Penghuni          @relation(fields: [penghuniId], references: [id], onDelete: Cascade)
+  
+  fotoKtpBaru String   
+  status      StatusPersetujuan @default(PENDING) 
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @default(now()) @updatedAt
 }

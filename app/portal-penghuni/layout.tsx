@@ -103,6 +103,7 @@ export default function PortalPenghuniLayout({
     { name: 'Keuangan Saya', path: '/portal-penghuni/keuangan', icon: '💳' },
     { name: 'Kontrak Sewa', path: '/portal-penghuni/kontrak', icon: '📄' },
     { name: 'Lapor Bantuan', path: '/portal-penghuni/bantuan', icon: '🛠️' },
+    { name: 'Papan Pengumuman', path: '/portal-penghuni/pengumuman', icon: '📢' },
   ]
 
   const hotlineWa = nomorDarurat || '6280000000000'
@@ -110,7 +111,7 @@ export default function PortalPenghuniLayout({
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif' }}>
       
-      {/* SIDEBAR KIRI (MENGGUNAKAN POLA FIXED PERSIS SEPERTI HALAMAN OPERATOR) */}
+      {/* SIDEBAR KIRI */}
       <aside style={{ width: '260px', backgroundColor: '#090d16', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
         
         <div style={{ height: '70px', display: 'flex', alignItems: 'center', padding: '0 24px', borderBottom: '1px solid #1e293b', flexShrink: 0 }}>
@@ -164,22 +165,22 @@ export default function PortalPenghuniLayout({
 
         {/* PROFIL & SETTINGS */}
         <div style={{ padding: '16px', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
-          <SettingsPopover userName={namaTenant} userRole="Tenant Aktif" />
+          <SettingsPopover userName={namaTenant} userRole="TENANT AKTIF" />
         </div>
       </aside>
 
-      {/* KONTEN UTAMA (MENGGUNAKAN MARGIN LEFT 260px PERSIS SEPERTI HALAMAN OPERATOR) */}
+      {/* KONTEN UTAMA */}
       <div style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b' }}>
         
-        {/* HEADER / TOPBAR (STICKY DI ATAS) */}
+        {/* HEADER / TOPBAR */}
         <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px', position: 'sticky', top: 0, zIndex: 9 }}>
           <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', width: '280px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>🔍 Cari informasi...</span>
+            <span style={{ fontSize: '12px', color: '#64748b' }}>🔍 Cari informasi fasilitas...</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></div>
-            <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '500' }}>Penghuni Aktif</span>
+            <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '500' }}>Sistem Online</span>
           </div>
         </header>
 

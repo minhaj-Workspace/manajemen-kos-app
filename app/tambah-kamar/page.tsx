@@ -3,39 +3,42 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
+import { StatusKamar } from '@prisma/client'
 
-// Server Action untuk memproses penyimpanan data kamar baru
+// ==========================================
+// SERVER ACTION
+// ==========================================
 async function tambahKamarAction(formData: FormData) {
   'use server'
 
   const nomorKamar = formData.get('nomorKamar') as string
   const tipe = formData.get('tipe') as string
   const harga = parseFloat(formData.get('harga') as string)
-  const status = formData.get('status') as string
+  const status = (formData.get('status') as string) || 'TERSEDIA'
 
   if (!nomorKamar || !tipe || isNaN(harga)) return
 
-  // Simpan ke database menggunakan Prisma
   await prisma.kamar.create({
     data: {
       nomorKamar,
       tipe,
       harga,
-      status: status || 'Tersedia',
+      status: status as StatusKamar,
     },
   })
 
   revalidatePath('/')
-  // Setelah berhasil, arahkan kembali ke halaman utama / dasbor
   redirect('/')
 }
 
+// ==========================================
+// HALAMAN UTAMA (WAJIB ADA EXPORT DEFAULT)
+// ==========================================
 export default async function TambahKamarPage() {
-  // Proteksi Akses: Hanya Operator/Owner yang boleh menambah kamar
   const cookieStore = await cookies()
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (userRole !== 'operator' && userRole !== 'owner') {
+  if (userRole !== 'OPERATOR' && userRole !== 'OWNER') {
     redirect('/')
   }
 
@@ -95,8 +98,8 @@ export default async function TambahKamarPage() {
             name="status" 
             style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #334155', boxSizing: 'border-box', background: '#090d16', color: '#fff', outline: 'none', fontSize: '14px' }}
           >
-            <option value="Tersedia">Tersedia</option>
-            <option value="Terisi">Terisi</option>
+            <option value="TERSEDIA">Tersedia</option>
+            <option value="TERISI">Terisi</option>
           </select>
         </div>
 

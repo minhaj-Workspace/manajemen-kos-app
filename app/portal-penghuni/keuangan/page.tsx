@@ -6,9 +6,8 @@ import path from 'path'
 import { revalidatePath } from 'next/cache'
 
 // ==========================================
-// SERVER ACTIONS
+// SERVER ACTIONS (Enum Mutakhir: MENUNGGU_VERIFIKASI)
 // ==========================================
-
 async function uploadBuktiBayarAction(formData: FormData) {
   'use server'
   const file = formData.get('fileBukti') as File
@@ -27,7 +26,7 @@ async function uploadBuktiBayarAction(formData: FormData) {
     where: { id: invoiceId },
     data: { 
       buktiBayarUrl: `/uploads/${fileName}`, 
-      status: 'Menunggu Verifikasi' 
+      status: 'MENUNGGU_VERIFIKASI' // Enum Mutakhir
     }
   })
   
@@ -37,14 +36,15 @@ async function uploadBuktiBayarAction(formData: FormData) {
 }
 
 // ==========================================
-// KOMPONEN UTAMA
+// KOMPONEN UTAMA KEUANGAN PENGHUNI
 // ==========================================
 export default async function KeuanganPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userId || userRole !== 'tenant') redirect('/')
+  // Validasi role dengan Enum 'TENANT'
+  if (!userId || userRole !== 'TENANT') redirect('/')
   
   const idUser = parseInt(userId, 10)
 
@@ -65,8 +65,10 @@ export default async function KeuanganPenghuniPage() {
   const namaProperti = settingProperti?.value || 'Gau Deceng Property'
 
   const daftarInvoice = penghuni.kamar?.invoices || []
-  const tagihanAktif = daftarInvoice.filter(inv => inv.status !== 'Lunas')
-  const riwayatLunas = daftarInvoice.filter(inv => inv.status === 'Lunas')
+  
+  // Pemfilteran status menggunakan Enum 'LUNAS' dan 'MENUNGGU_VERIFIKASI'
+  const tagihanAktif = daftarInvoice.filter(inv => inv.status !== 'LUNAS')
+  const riwayatLunas = daftarInvoice.filter(inv => inv.status === 'LUNAS')
 
   return (
     <div style={{ padding: '24px 30px', fontFamily: 'sans-serif', backgroundColor: '#090d16', minHeight: '100vh', color: '#f8fafc', boxSizing: 'border-box' }}>
@@ -99,38 +101,42 @@ export default async function KeuanganPenghuniPage() {
               <p style={{ color: '#94a3b8', fontSize: '12px', margin: 0 }}>Semua kewajiban finansial Anda bulan ini telah diselesaikan.</p>
             </div>
           ) : (
-            tagihanAktif.map(inv => (
-              <div key={inv.id} style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: inv.status === 'Menunggu Verifikasi' ? '#facc15' : '#f87171' }}></div>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Nominal Tagihan</span>
-                    <h3 style={{ fontSize: '22px', margin: '2px 0 4px 0', color: '#fff', fontWeight: 'bold' }}>Rp {inv.jumlah.toLocaleString('id-ID')}</h3>
-                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Jatuh Tempo: {new Date(inv.jatuhTempo).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+            tagihanAktif.map(inv => {
+              const isMenungguVerifikasi = inv.status === 'MENUNGGU_VERIFIKASI'
+
+              return (
+                <div key={inv.id} style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '20px', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: isMenungguVerifikasi ? '#facc15' : '#f87171' }}></div>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Nominal Tagihan</span>
+                      <h3 style={{ fontSize: '22px', margin: '2px 0 4px 0', color: '#fff', fontWeight: 'bold' }}>Rp {inv.jumlah.toLocaleString('id-ID')}</h3>
+                      <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Jatuh Tempo: {new Date(inv.jatuhTempo).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                    </div>
+                    <span style={{ backgroundColor: '#1e293b', border: '1px solid #334155', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', color: isMenungguVerifikasi ? '#facc15' : '#f87171' }}>
+                      {inv.status.replace('_', ' ')}
+                    </span>
                   </div>
-                  <span style={{ backgroundColor: '#1e293b', border: '1px solid #334155', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', color: inv.status === 'Menunggu Verifikasi' ? '#facc15' : '#f87171' }}>
-                    {inv.status}
-                  </span>
+                  
+                  {isMenungguVerifikasi ? (
+                    <div style={{ backgroundColor: '#090d16', padding: '12px', borderRadius: '8px', color: '#facc15', fontSize: '12px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>⏳</span>
+                      <span>Bukti transfer telah dikirim dan sedang dalam antrean verifikasi operator.</span>
+                    </div>
+                  ) : (
+                    <form action={uploadBuktiBayarAction} style={{ backgroundColor: '#090d16', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1', fontWeight: 'bold' }}>Unggah Bukti Transfer Pembayaran:</p>
+                      <input type="hidden" name="invoiceId" value={inv.id} />
+                      <input type="file" name="fileBukti" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155' }} />
+                      <button type="submit" style={{ backgroundColor: '#0ea5e9', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start' }}>
+                        📤 Kirim Bukti Bayar
+                      </button>
+                    </form>
+                  )}
                 </div>
-                
-                {inv.status === 'Menunggu Verifikasi' ? (
-                  <div style={{ backgroundColor: '#090d16', padding: '12px', borderRadius: '8px', color: '#facc15', fontSize: '12px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>⏳</span>
-                    <span>Bukti transfer telah dikirim dan sedang dalam antrean verifikasi operator.</span>
-                  </div>
-                ) : (
-                  <form action={uploadBuktiBayarAction} style={{ backgroundColor: '#090d16', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1', fontWeight: 'bold' }}>Unggah Bukti Transfer Pembayaran:</p>
-                    <input type="hidden" name="invoiceId" value={inv.id} />
-                    <input type="file" name="fileBukti" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155' }} />
-                    <button type="submit" style={{ backgroundColor: '#0ea5e9', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start' }}>
-                      📤 Kirim Bukti Bayar
-                    </button>
-                  </form>
-                )}
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 

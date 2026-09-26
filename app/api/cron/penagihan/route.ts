@@ -1,24 +1,29 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-// Endpoint ini dirancang untuk dipanggil oleh Cron Job otomatis setiap pukul 00:01
+// Endpoint ini dirancang untuk dipanggil oleh Cron Job otomatis setiap pukul 00:01 WITA
 export async function GET(request: Request) {
   try {
-    // 1. Keamanan Opsional: Cek Secret Token dari Header Cron (jika menggunakan Vercel/External Scheduler)
+    // 1. Keamanan Opsional: Cek Secret Token dari Header Cron (Vercel Cron / External Scheduler)
     const authHeader = request.headers.get('authorization')
-    // if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // }
+    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
+    // 2. Presisi Zona Waktu Lokal (WITA - Asia/Makassar / UTC+8)
     const hariIni = new Date()
-    hariIni.setHours(0, 0, 0, 0)
+    const utcOffset = hariIni.getTimezoneOffset() * 60000
+    const witaOffset = 8 * 3600000 // UTC+8
+    const hariIniWITA = new Date(hariIni.getTime() + utcOffset + witaOffset)
+    hariIniWITA.setHours(0, 0, 0, 0)
 
-    // 2. Ambil semua invoice yang belum lunas/diverifikasi dan sudah melewati jatuh tempo
+    // 3. Ambil semua invoice yang BELUM_LUNAS dan sudah melewati jatuh tempo
+    // Menggunakan Enum Mutakhir: 'LUNAS', 'MENUNGGU_VERIFIKASI', 'BELUM_LUNAS'
     const tagihanExpired = await prisma.invoice.findMany({
       where: {
-        status: { notIn: ['Lunas', 'Menunggu Verifikasi'] },
+        status: 'BELUM_LUNAS',
         jatuhTempo: {
-          lt: hariIni
+          lt: hariIniWITA
         }
       },
       include: {
@@ -26,33 +31,33 @@ export async function GET(request: Request) {
           include: {
             penghuni: true
           }
-        }
+        },
+        penghuni: true
       }
     })
 
-    let jumlahDiupdate = 0
+    let jumlahTeridentifikasi = tagihanExpired.length
 
-    // 3. Ubah status menjadi Overdue (Menunggak) secara massal
-    for (const inv of tagihanExpired) {
-      await prisma.invoice.update({
-        where: { id: inv.id },
-        data: { status: 'Overdue' } // Menandai bahwa tagihan ini menunggak
-      })
-      jumlahDiupdate++
+    // 4. Proses log atau persiapan integrasi pengingat WhatsApp otomatis
+    const detailLog = tagihanExpired.map(inv => {
+      const namaPenghuni = inv.penghuni?.nama || 'Penyewa'
+      const nomorHp = inv.penghuni?.nomorHp
       
-      // Contoh integrasi WhatsApp API di masa depan:
-      // const nomorHp = inv.kamar?.penghuni?.nomorHp;
-      // if (nomorHp) {
-      //   kirimPesanWhatsApp(nomorHp, `Tagihan Anda senilai Rp ${inv.jumlah.toLocaleString('id-ID')} telah menunggak.`);
-      // }
-    }
+      // Di sini Anda bisa memicu fungsi pengiriman WhatsApp Gateway di masa depan
+      if (nomorHp) {
+        // console.log(`Mengirim pengingat ke ${nomorHp} untuk Invoice #${inv.id}`)
+      }
+
+      return `Invoice #${inv.id} - Kamar ${inv.kamar?.nomorKamar || '-'} (${namaPenghuni}) melewati jatuh tempo.`
+    })
 
     return NextResponse.json({
       success: true,
       message: 'Cron job pengecekan penagihan berhasil dijalankan.',
       timestamp: new Date().toISOString(),
-      totalOverdueUpdated: jumlahDiupdate,
-      detail: tagihanExpired.map(i => `Invoice #${i.id} - Kamar ${i.kamar?.nomorKamar} diubah ke Overdue`)
+      timezone: 'Asia/Makassar (WITA)',
+      totalOverdueDetected: jumlahTeridentifikasi,
+      detail: detailLog
     }, { status: 200 })
 
   } catch (error: any) {

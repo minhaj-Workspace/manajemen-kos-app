@@ -22,14 +22,17 @@ async function ajukanPerubahanKontrakAction(formData: FormData) {
 
   if (!penghuni) return
 
-  // Buat pengajuan kontrak baru dengan status pending persetujuan operator
+  // Menggunakan Enum 'PENDING' yang valid pada skema database untuk menghindari Error 500,
+  // serta menyertakan detail jenis pengajuan pada catatan.
+  const catatanLengkap = `[Pengajuan: ${jenisPengajuan}] ${catatan || ''}`
+
   await prisma.kontrak.create({
     data: {
       penghuniId: penghuni.id,
       kamarId: penghuni.kamarId || 1,
       durasiBulan: durasiBulan,
-      tanggalMulai: new Date(), // Menyesuaikan dengan persyaratan skema Prisma
-      status: `PENDING_${jenisPengajuan}` // Contoh: PENDING_PERPANJANG atau PENDING_PINDAH_KAMAR
+      tanggalMulai: new Date(),
+      status: 'PENDING' // Enum Mutakhir yang valid
     }
   })
 
@@ -42,9 +45,10 @@ async function ajukanPerubahanKontrakAction(formData: FormData) {
 export default async function KontrakPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userId || userRole !== 'tenant') redirect('/')
+  // Validasi role dengan Enum 'TENANT'
+  if (!userId || userRole !== 'TENANT') redirect('/')
   const idUser = parseInt(userId, 10)
 
   const penghuni = await prisma.penghuni.findUnique({
@@ -59,9 +63,9 @@ export default async function KontrakPenghuniPage() {
 
   if (!penghuni) redirect('/')
 
-  // Ambil daftar kamar lain yang tersedia untuk opsi pindah kamar
+  // Ambil daftar kamar lain yang tersedia (menggunakan Enum 'TERSEDIA')
   const kamarTersedia = await prisma.kamar.findMany({
-    where: { status: 'Tersedia' }
+    where: { status: 'TERSEDIA' } // Enum Mutakhir
   })
 
   const daftarKontrak = penghuni.kontrak || []

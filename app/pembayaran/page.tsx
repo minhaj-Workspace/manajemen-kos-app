@@ -4,10 +4,12 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 
-// Server Action untuk memproses pembayaran & menyimpan referensi bukti bayar
+// ==========================================
+// SERVER ACTION (Enum Mutakhir: MENUNGGU_VERIFIKASI)
+// ==========================================
 async function bayarTagihanAction(formData: FormData) {
   'use server'
-  const invoiceId = parseInt(formData.get('invoiceId') as string)
+  const invoiceId = parseInt(formData.get('invoiceId') as string, 10)
   const fileBukti = formData.get('buktiBayar') as File | null
   
   const buktiBayarUrl = fileBukti && fileBukti.size > 0 ? fileBukti.name : "bukti-transfer.jpg"
@@ -15,7 +17,7 @@ async function bayarTagihanAction(formData: FormData) {
   await prisma.invoice.update({
     where: { id: invoiceId },
     data: { 
-      status: 'Menunggu Verifikasi',
+      status: 'MENUNGGU_VERIFIKASI', // Enum Mutakhir
       buktiBayarUrl: buktiBayarUrl 
     }
   })
@@ -24,12 +26,16 @@ async function bayarTagihanAction(formData: FormData) {
   revalidatePath('/verifikasi')
 }
 
+// ==========================================
+// KOMPONEN HALAMAN PEMBAYARAN PENGHUNI
+// ==========================================
 export default async function PembayaranPenghuniPage() {
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  if (!userId || userRole !== 'tenant') {
+  // Validasi role dengan Enum 'TENANT'
+  if (!userId || userRole !== 'TENANT') {
     redirect('/')
   }
 
@@ -52,14 +58,15 @@ export default async function PembayaranPenghuniPage() {
     )
   }
 
-  // Ambil semua riwayat invoice untuk kamar ini secara aman
+  // Ambil semua riwayat invoice untuk kamar ini
   const semuaTagihan = await prisma.invoice.findMany({
     where: { kamarId: penghuni.kamarId },
     orderBy: { jatuhTempo: 'asc' }
   })
 
-  const tagihanAktif = semuaTagihan.filter((inv) => inv.status !== 'Lunas')
-  const riwayatLunas = semuaTagihan.filter((inv) => inv.status === 'Lunas')
+  // Pemfilteran status menggunakan Enum 'LUNAS'
+  const tagihanAktif = semuaTagihan.filter((inv) => inv.status !== 'LUNAS')
+  const riwayatLunas = semuaTagihan.filter((inv) => inv.status === 'LUNAS')
 
   const nomorKamarTeks = penghuni.kamar?.nomorKamar || '-'
 
@@ -111,7 +118,8 @@ export default async function PembayaranPenghuniPage() {
                 </h3>
               </div>
 
-              {inv.status === 'Menunggu Verifikasi' ? (
+              {/* Pemeriksaan status menggunakan Enum 'MENUNGGU_VERIFIKASI' */}
+              {inv.status === 'MENUNGGU_VERIFIKASI' ? (
                 <div style={{ backgroundColor: '#744210', color: '#ffe3a8', padding: '12px', borderRadius: '6px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold' }}>
                   ⏳ Pembayaran sedang diverifikasi oleh Operator.
                 </div>

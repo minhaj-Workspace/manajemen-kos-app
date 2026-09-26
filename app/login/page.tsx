@@ -4,7 +4,9 @@ import bcrypt from 'bcryptjs'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
 
-// Server Action untuk memvalidasi login
+// ==========================================
+// SERVER ACTION (Autentikasi & Penyimpanan Cookie Sesi)
+// ==========================================
 async function loginUserAction(formData: FormData) {
   'use server'
   const email = formData.get('email') as string
@@ -32,7 +34,7 @@ async function loginUserAction(formData: FormData) {
   cookieStore.set('user_id', '', { path: '/', maxAge: 0 })
   cookieStore.set('user_role', '', { path: '/', maxAge: 0 })
 
-  // Tulis cookie baru dengan role yang benar-benar fresh dari database
+  // Tulis cookie baru dengan ID pengguna
   cookieStore.set('user_id', user.id.toString(), { 
     httpOnly: true, 
     path: '/',
@@ -40,17 +42,21 @@ async function loginUserAction(formData: FormData) {
     maxAge: 60 * 60 * 24 * 7 
   })
   
-  cookieStore.set('user_role', user.role.trim().toLowerCase(), { 
+  // SIMPAN ROLE DALAM HURUF KAPITAL (Konsisten dengan Enum Prisma: TENANT, OPERATOR, OWNER)
+  cookieStore.set('user_role', user.role.trim().toUpperCase(), { 
     httpOnly: true, 
     path: '/',
     secure: process.env.NODE_ENV === 'production',
     maxAge: 60 * 60 * 24 * 7 
   })
 
-  // Arahkan ke root (/) agar app/page.tsx mengarahkan dashboard sesuai rolenya
+  // Arahkan ke root (/) agar app/page.tsx mengarahkan ke dasbor sesuai rolenya
   redirect('/')
 }
 
+// ==========================================
+// KOMPONEN HALAMAN LOGIN
+// ==========================================
 export default function LoginPage() {
   return (
     <main style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a202c', fontFamily: 'sans-serif' }}>

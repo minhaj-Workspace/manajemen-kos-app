@@ -4,24 +4,23 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 export default async function KatalogKamarPage() {
-  // Proteksi Halaman: Pastikan yang mengakses adalah pengguna yang sudah login dengan role Tenant
+  // 1. Proteksi Halaman: Menggunakan Enum 'TENANT' yang selaras dengan skema database
   const cookieStore = await cookies()
   const userId = cookieStore.get('user_id')?.value
-  const userRole = cookieStore.get('user_role')?.value?.trim().toLowerCase()
+  const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Jika belum login atau bukan tenant (aman dari perbedaan huruf besar/kecil)
-  if (!userId || userRole !== 'tenant') {
+  if (!userId || userRole !== 'TENANT') {
     redirect('/login')
   }
 
-  // Ambil user data untuk menyapa (Opsional tapi bagus untuk UX)
+  // 2. Ambil data user untuk sapaan dasbor tenant
   const user = await prisma.user.findUnique({
     where: { id: parseInt(userId, 10) }
   })
 
-  // SOP 2: HANYA menampilkan kamar yang berstatus 'Tersedia'
+  // 3. Mengambil data kamar dengan status ENUM mutakhir ('TERSEDIA')
   const kamarTersedia = await prisma.kamar.findMany({
-    where: { status: 'Tersedia' },
+    where: { status: 'TERSEDIA' }, // Enum Mutakhir
     orderBy: { nomorKamar: 'asc' }
   })
 
@@ -39,13 +38,15 @@ export default async function KatalogKamarPage() {
           </p>
         </div>
 
-        {/* Tombol Logout Sederhana */}
-        <Link 
-          href="/login" 
-          style={{ backgroundColor: '#e53e3e', color: '#fff', padding: '10px 16px', borderRadius: '6px', textDecoration: 'none', fontWeight: 'bold', fontSize: '14px' }}
-        >
-          Keluar
-        </Link>
+        {/* Tombol Logout mengarah ke API Logout Endpoint kita */}
+        <form action="/api/logout" method="POST" style={{ margin: 0 }}>
+          <button 
+            type="submit"
+            style={{ backgroundColor: '#e53e3e', color: '#fff', padding: '10px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+          >
+            Keluar
+          </button>
+        </form>
       </div>
 
       {/* Daftar Kamar Tersedia */}
@@ -86,9 +87,9 @@ export default async function KatalogKamarPage() {
                 </p>
               </div>
 
-              {/* Tombol untuk melanjutkan ke SOP 3 (Pengisian Profil & KTP) */}
+              {/* Tautan diselaraskan ke route /booking/[id] yang sesuai */}
               <Link 
-                href={`/katalog-kamar/${kamar.id}/booking`}
+                href={`/booking/${kamar.id}`}
                 style={{
                   display: 'block',
                   textAlign: 'center',
