@@ -2,18 +2,44 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import fs from 'fs'
+import path from 'path'
 
 // ==========================================
-// SERVER ACTION (Enum Mutakhir: PENDING)
+// SERVER ACTION (Dengan Dukungan Unggah File Fisik)
 // ==========================================
 async function ajukanTiketAction(formData: FormData) {
   'use server'
   const kamarId = formData.get('kamarId') as string
   const kategori = formData.get('kategori') as string
   const deskripsi = formData.get('deskripsi') as string
-  const fotoUrl = formData.get('fotoUrl') as string
+  const fotoFile = formData.get('fotoFile') as File | null
 
   if (!kamarId || !deskripsi) return
+
+  let fotoUrlToSave = null
+
+  // Proses pengunggahan berkas fisik foto kerusakan ke folder public/uploads/maintenance
+  if (fotoFile && fotoFile.size > 0) {
+    try {
+      const bytes = await fotoFile.arrayBuffer()
+      const buffer = Buffer.from(bytes)
+
+      const originalName = fotoFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const fileName = `ticket_${Date.now()}_${originalName}`
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'maintenance')
+
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true })
+      }
+
+      const filePath = path.join(uploadDir, fileName)
+      fs.writeFileSync(filePath, buffer)
+      fotoUrlToSave = `/uploads/maintenance/${fileName}`
+    } catch (error) {
+      console.error('Gagal mengunggah foto kendala:', error)
+    }
+  }
 
   const deskripsiLengkap = kategori ? `[Kategori: ${kategori}] ${deskripsi}` : deskripsi
 
@@ -23,7 +49,7 @@ async function ajukanTiketAction(formData: FormData) {
       deskripsi: deskripsiLengkap, 
       status: 'PENDING', // Enum Mutakhir (Menyesuaikan Kanban Operator)
       tanggungJawab: 'Pengelola', 
-      ...(fotoUrl ? { fotoUrl } : {})
+      ...(fotoUrlToSave ? { fotoUrl: fotoUrlToSave } : {})
     }
   })
 
@@ -93,7 +119,7 @@ export default async function BantuanPenghuniPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
         
-        {/* KOLOM KIRI: FORM PENGAJUAN LENGKAP */}
+        {/* KOLOM KIRI: FORM PENGAJUAN DENGAN UNGGAH BERKAS FISIK */}
         <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '24px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#eab308' }}></div>
           <h2 style={{ fontSize: '15px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px', fontWeight: 'bold' }}>
@@ -101,7 +127,7 @@ export default async function BantuanPenghuniPage() {
           </h2>
           
           {penghuni.kamarId ? (
-            <form action={ajukanTiketAction} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form action={ajukanTiketAction} method="POST" encType="multipart/form-data" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <input type="hidden" name="kamarId" value={penghuni.kamarId} />
 
               <div>
@@ -130,14 +156,16 @@ export default async function BantuanPenghuniPage() {
                 ></textarea>
               </div>
 
+              {/* UNGGAH FOTO FISIK (MENGGANTIKAN URL TEKS) */}
               <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#94a3b8', fontWeight: 'bold' }}>URL Foto Kerusakan (Opsional)</label>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#38bdf8', fontWeight: 'bold' }}>Unggah Foto Kerusakan (Opsional)</label>
                 <input 
-                  type="url" 
-                  name="fotoUrl" 
-                  placeholder="https://contoh.com/foto-kerusakan.jpg" 
-                  style={{ width: '100%', boxSizing: 'border-box', backgroundColor: '#090d16', border: '1px solid #334155', color: '#fff', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', outline: 'none' }}
+                  type="file" 
+                  name="fotoFile" 
+                  accept=".jpg,.jpeg,.png"
+                  style={{ width: '100%', boxSizing: 'border-box', backgroundColor: '#090d16', border: '1px solid #334155', color: '#cbd5e1', padding: '10px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer' }}
                 />
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Format foto: JPG, JPEG, atau PNG. Langsung pilih dari galeri HP atau komputer Anda.</span>
               </div>
 
               <button type="submit" style={{ backgroundColor: '#eab308', color: '#000', border: 'none', padding: '12px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', alignSelf: 'flex-start', transition: '0.2s' }}>
@@ -175,6 +203,15 @@ export default async function BantuanPenghuniPage() {
                     </div>
 
                     <p style={{ margin: 0, color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5' }}>{t.deskripsi}</p>
+
+                    {/* TAMPILKAN FOTO JIKA ADA */}
+                    {t.fotoUrl && (
+                      <div>
+                        <a href={t.fotoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          📷 Lihat Foto Bukti Kerusakan
+                        </a>
+                      </div>
+                    )}
 
                     {/* METRIK INTEGRASI OPERATOR */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' }}>

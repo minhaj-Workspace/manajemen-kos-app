@@ -2,13 +2,15 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
+import { writeFile } from 'fs/promises'
+import fs from 'fs'
+import path from 'path'
 import bcrypt from 'bcryptjs'
 import { SubmitSettingBtn, DeleteUserForm } from '@/components/SettingsClientActions'
 
 // ==========================================
 // ENTERPRISE SERVER ACTIONS (SANGAT AMAN)
 // ==========================================
-// Bantuan Proteksi: Memastikan hanya Admin (Owner/Operator) yang mengeksekusi
 async function verifyAdminAccess() {
   const cookieStore = await cookies()
   const role = cookieStore.get('user_role')?.value?.trim().toLowerCase()
@@ -26,27 +28,56 @@ async function updateSettingAction(formData: FormData) {
   revalidatePath('/settings')
 }
 
+// Server Action untuk Unggah Berkas Fisik Foto Profil Admin/Operator
 async function updateProfileAction(formData: FormData) {
   'use server'
   const cookieStore = await cookies()
-  const userId = parseInt(cookieStore.get('user_id')?.value || '0')
+  const userId = parseInt(cookieStore.get('user_id')?.value || '0', 10)
   if (!userId) return
 
   const namaLengkap = formData.get('namaLengkap') as string
   const nomorHp = formData.get('nomorHp') as string
-  const fotoProfil = formData.get('fotoProfil') as string
+  const fileFoto = formData.get('fileFotoProfil') as File
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { namaLengkap: namaLengkap || null, nomorHp: nomorHp || null, fotoProfil: fotoProfil || null }
-  })
-  revalidatePath('/settings')
+  try {
+    let fotoProfilUrl: string | undefined = undefined
+
+    if (fileFoto && fileFoto.size > 0) {
+      const bytes = await fileFoto.arrayBuffer()
+      const buffer = Buffer.from(bytes)
+      const originalName = fileFoto.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const fileName = `admin-profil-${userId}-${Date.now()}-${originalName}`
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads')
+
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true })
+      }
+
+      const filePath = path.join(uploadDir, fileName)
+      await writeFile(filePath, buffer)
+      fotoProfilUrl = `/uploads/${fileName}`
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } })
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        namaLengkap: namaLengkap || null, 
+        nomorHp: nomorHp || null, 
+        fotoProfil: fotoProfilUrl !== undefined ? fotoProfilUrl : existingUser?.fotoProfil 
+      }
+    })
+    revalidatePath('/settings')
+  } catch (error) {
+    console.error('Gagal memperbarui profil:', error)
+  }
 }
 
 async function changePasswordAction(formData: FormData) {
   'use server'
   const cookieStore = await cookies()
-  const userId = parseInt(cookieStore.get('user_id')?.value || '0')
+  const userId = parseInt(cookieStore.get('user_id')?.value || '0', 10)
   const passwordBaru = formData.get('passwordBaru') as string
   
   if (!userId || !passwordBaru || passwordBaru.length < 6) return
@@ -60,17 +91,16 @@ async function requestRoleChangeAction(formData: FormData) {
   'use server'
   const currentUserRole = await verifyAdminAccess()
   const cookieStore = await cookies()
-  const currentUserId = parseInt(cookieStore.get('user_id')?.value || '0')
+  const currentUserId = parseInt(cookieStore.get('user_id')?.value || '0', 10)
   
-  const targetUserId = parseInt(formData.get('userId') as string)
-  const targetRole = formData.get('targetRole') as 'OWNER' | 'OPERATOR' | 'TENANT' // ENUM Tepat
+  const targetUserId = parseInt(formData.get('userId') as string, 10)
+  const targetRole = formData.get('targetRole') as 'OWNER' | 'OPERATOR' | 'TENANT'
 
   if (!targetUserId || !targetRole || !currentUserId) return
 
   const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } })
   if (!targetUser) return
 
-  // Proteksi: Operator tidak boleh mengubah role Owner
   if (currentUserRole === 'operator' && targetUser.role === 'OWNER') return 
 
   await prisma.persetujuanRole.create({
@@ -84,8 +114,8 @@ async function approveRoleChangeAction(formData: FormData) {
   const role = await verifyAdminAccess()
   if (role !== 'owner') throw new Error('Hanya Owner yang bisa menyetujui.')
 
-  const requestId = parseInt(formData.get('requestId') as string)
-  const userId = parseInt(formData.get('userId') as string)
+  const requestId = parseInt(formData.get('requestId') as string, 10)
+  const userId = parseInt(formData.get('userId') as string, 10)
   const targetRole = formData.get('targetRole') as 'OWNER' | 'OPERATOR' | 'TENANT'
 
   if (!requestId || !userId || !targetRole) return
@@ -102,7 +132,7 @@ async function rejectRoleChangeAction(formData: FormData) {
   const role = await verifyAdminAccess()
   if (role !== 'owner') throw new Error('Hanya Owner yang bisa menolak.')
 
-  const requestId = parseInt(formData.get('requestId') as string)
+  const requestId = parseInt(formData.get('requestId') as string, 10)
   if (!requestId) return
   await prisma.persetujuanRole.update({ where: { id: requestId }, data: { status: 'REJECTED' } })
   revalidatePath('/settings')
@@ -111,13 +141,12 @@ async function rejectRoleChangeAction(formData: FormData) {
 async function deleteUserAction(formData: FormData) {
   'use server'
   const currentUserRole = await verifyAdminAccess()
-  const userId = parseInt(formData.get('userId') as string)
+  const userId = parseInt(formData.get('userId') as string, 10)
   if (!userId) return
 
   const targetUser = await prisma.user.findUnique({ where: { id: userId } })
   if (!targetUser) return
   
-  // Proteksi: Operator tidak bisa menghapus Owner
   if (currentUserRole === 'operator' && targetUser.role === 'OWNER') return
 
   await prisma.user.delete({ where: { id: userId } })
@@ -186,11 +215,10 @@ export default async function SettingPage() {
 
   if (!userId || (userRole !== 'operator' && userRole !== 'owner')) redirect('/')
 
-  const currentUser = await prisma.user.findUnique({ where: { id: parseInt(userId) } })
+  const currentUser = await prisma.user.findUnique({ where: { id: parseInt(userId, 10) } })
 
   const settingsList = await prisma.setting.findMany()
   const hotlineSetting = settingsList.find(s => s.key === 'hotline_darurat')?.value || ''
-  const ownerNameSetting = settingsList.find(s => s.key === 'nama_owner')?.value || 'Pengelola Kos'
   const propertyNameSetting = settingsList.find(s => s.key === 'nama_properti')?.value || 'Gau Deceng Property'
   const wifiSsidSetting = settingsList.find(s => s.key === 'wifi_ssid')?.value || 'KosApp_HighSpeed_VIP'
   const wifiPasswordSetting = settingsList.find(s => s.key === 'wifi_password')?.value || 'JuaraBersama2026!'
@@ -302,12 +330,12 @@ export default async function SettingPage() {
         {/* GRID PENGATURAN (Bento Layout) */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           
-          {/* 1. PROFIL PENGGUNA */}
+          {/* 1. PROFIL PENGGUNA (DIUBAH MENJADI FORM FILE UPLOAD) */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 relative overflow-hidden shadow-xl">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
             <h2 className="text-sm font-bold text-white border-b border-slate-800 pb-3 mb-4">👤 Identitas Profil</h2>
             {currentUser && (
-              <form action={updateProfileAction} className="flex flex-col gap-4">
+              <form action={updateProfileAction} method="POST" encType="multipart/form-data" className="flex flex-col gap-4">
                 <div className="flex items-center gap-4 mb-2">
                   <div className="w-12 h-12 rounded-full bg-slate-800 border-2 border-emerald-500 flex items-center justify-center overflow-hidden text-emerald-500 font-bold text-lg shrink-0">
                     {currentUser.fotoProfil ? <img src={currentUser.fotoProfil} alt="Avatar" className="w-full h-full object-cover" /> : (currentUser.namaLengkap ? currentUser.namaLengkap[0] : currentUser.email[0]).toUpperCase()}
@@ -318,8 +346,8 @@ export default async function SettingPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1.5">URL Foto Profil</label>
-                  <input type="url" name="fotoProfil" defaultValue={currentUser.fotoProfil || ''} placeholder="https://..." className="w-full bg-slate-950 border border-slate-800 text-white p-2.5 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500 outline-none" />
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">Unggah Foto Profil Baru</label>
+                  <input type="file" name="fileFotoProfil" accept="image/*" className="w-full bg-slate-950 border border-slate-800 text-slate-300 p-2 rounded-lg text-xs outline-none cursor-pointer file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1.5">Nama Lengkap</label>

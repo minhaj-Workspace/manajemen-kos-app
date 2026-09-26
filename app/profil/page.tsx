@@ -6,7 +6,7 @@ import { writeFile } from 'fs/promises'
 import path from 'path'
 import { revalidatePath } from 'next/cache'
 
-// Server Action untuk memproses unggah file KTP dari halaman Profil
+// Server Action untuk memproses unggah file KTP dari halaman Profil (Tersimpan di tabel Penghuni)
 async function uploadKtpAction(formData: FormData) {
   'use server'
   const file = formData.get('fileKtp') as File
@@ -14,19 +14,76 @@ async function uploadKtpAction(formData: FormData) {
 
   if (!file || file.size === 0 || !penghuniId) return
 
-  const bytes = await file.arrayBuffer()
-  const buffer = Buffer.from(bytes)
-  const fileName = `ktp-${penghuniId}-${Date.now()}.${file.name.split('.').pop()}`
-  const filePath = path.join(process.cwd(), 'public/uploads', fileName)
+  try {
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const fileName = `ktp-${penghuniId}-${Date.now()}-${originalName}`
+    const filePath = path.join(process.cwd(), 'public', 'uploads', fileName)
 
-  await writeFile(filePath, buffer)
+    await writeFile(filePath, buffer)
 
-  await prisma.penghuni.update({
-    where: { id: penghuniId },
-    data: { fotoKtp: `/uploads/${fileName}` }
-  })
+    await prisma.penghuni.update({
+      where: { id: penghuniId },
+      data: { fotoKtp: `/uploads/${fileName}` }
+    })
 
-  revalidatePath('/portal-penghuni/profil')
+    revalidatePath('/portal-penghuni/profil')
+  } catch (error) {
+    console.error('Gagal mengunggah KTP:', error)
+  }
+}
+
+// Server Action untuk memproses unggah Foto Profil (Tersimpan di tabel User sesuai skema database Anda)
+async function uploadFotoProfilAction(formData: FormData) {
+  'use server'
+  const file = formData.get('fileFotoProfil') as File
+  const userId = parseInt(formData.get('userId') as string, 10)
+
+  if (!file || file.size === 0 || !userId) return
+
+  try {
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const fileName = `profil-user-${userId}-${Date.now()}-${originalName}`
+    const filePath = path.join(process.cwd(), 'public', 'uploads', fileName)
+
+    await writeFile(filePath, buffer)
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fotoProfil: `/uploads/${fileName}` }
+    })
+
+    revalidatePath('/portal-penghuni/profil')
+    revalidatePath('/portal-penghuni')
+  } catch (error) {
+    console.error('Gagal mengunggah foto profil:', error)
+  }
+}
+
+// Server Action untuk memperbarui nomor kontak mandiri (Nama Tetap Terkunci / Read-Only)
+async function updateKontakAction(formData: FormData) {
+  'use server'
+  const penghuniId = parseInt(formData.get('penghuniId') as string, 10)
+  const nomorHp = formData.get('nomorHp') as string
+
+  if (!penghuniId || !nomorHp) return
+
+  try {
+    await prisma.penghuni.update({
+      where: { id: penghuniId },
+      data: {
+        nomorHp: nomorHp.trim()
+      }
+    })
+
+    revalidatePath('/portal-penghuni/profil')
+    revalidatePath('/portal-penghuni')
+  } catch (error) {
+    console.error('Gagal memperbarui kontak:', error)
+  }
 }
 
 export default async function ProfilPenghuniPage() {
@@ -34,7 +91,6 @@ export default async function ProfilPenghuniPage() {
   const userId = cookieStore.get('user_id')?.value
   const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Proteksi Akses: Menggunakan Enum 'TENANT' yang konsisten
   if (!userId || userRole !== 'TENANT') {
     redirect('/')
   }
@@ -44,18 +100,24 @@ export default async function ProfilPenghuniPage() {
     redirect('/')
   }
 
-  const penghuni = await prisma.penghuni.findUnique({
-    where: { userId: idUser },
+  // Mengambil data User beserta relasi Penghuni, Kamar, dan Kontrak
+  const userData = await prisma.user.findUnique({
+    where: { id: idUser },
     include: {
-      kamar: true,
-      kontrak: {
-        orderBy: { createdAt: 'desc' },
-        take: 1
+      penghuni: {
+        include: {
+          kamar: true,
+          kontrak: {
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          }
+        }
       }
     }
   })
 
-  if (!penghuni) redirect('/')
+  if (!userData || !userData.penghuni) redirect('/')
+  const penghuni = userData.penghuni
 
   return (
     <div style={{ backgroundColor: '#090d16', color: '#f8fafc', minHeight: '100vh', padding: '30px', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
@@ -66,7 +128,7 @@ export default async function ProfilPenghuniPage() {
           <div>
             <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#38bdf8', fontWeight: 'bold' }}>TENANT SELF-SERVICE PORTAL</span>
             <h1 style={{ fontSize: '26px', fontWeight: 'bold', color: '#fff', margin: '4px 0 6px 0' }}>⚙️ Profil & Tata Tertib Hunian</h1>
-            <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>Kelola data administratif dan pelajari aturan fasilitas hunian Anda.</p>
+            <p style={{ color: '#94a3b8', fontSize: '14px', margin: 0 }}>Kelola foto profil akun, nomor kontak, dokumen KTP, dan pelajari aturan hunian.</p>
           </div>
           <div>
             <Link href="/portal-penghuni" style={{ backgroundColor: '#1e293b', color: '#38bdf8', border: '1px solid #334155', padding: '10px 16px', borderRadius: '8px', fontSize: '13px', textDecoration: 'none', fontWeight: 'bold' }}>
@@ -77,31 +139,71 @@ export default async function ProfilPenghuniPage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
           
-          {/* KOLOM KIRI: DATA ADMINISTRATIF & KTP */}
+          {/* KOLOM KIRI: FOTO PROFIL, KONTAK, & KTP */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* DATA PENGHUNI BENTO CARD */}
-            <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '24px' }}>
-              <h2 style={{ fontSize: '16px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px' }}>📋 Data Administratif</h2>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b', fontSize: '13px' }}>Nama Lengkap</span>
-                  <span style={{ color: '#fff', fontSize: '13px', fontWeight: 'bold' }}>{penghuni.nama}</span>
-                </div>
-                <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b', fontSize: '13px' }}>No. WhatsApp</span>
-                  <span style={{ color: '#fff', fontSize: '13px', fontWeight: 'bold' }}>{penghuni.nomorHp}</span>
-                </div>
-                <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b', fontSize: '13px' }}>NIK KTP</span>
-                  <span style={{ color: '#fff', fontSize: '13px', fontWeight: 'bold' }}>{penghuni.nik || '-'}</span>
-                </div>
-                <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '12px 16px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#64748b', fontSize: '13px' }}>Kamar Terdaftar</span>
-                  <span style={{ color: '#4ade80', fontSize: '13px', fontWeight: 'bold' }}>Kamar {penghuni.kamar?.nomorKamar || '-'}</span>
-                </div>
+            {/* UPLOAD FOTO PROFIL CARD */}
+            <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '24px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+              <div style={{ width: '70px', height: '70px', borderRadius: '50%', backgroundColor: '#38bdf8', color: '#090d16', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '24px', overflow: 'hidden', flexShrink: 0, border: '2px solid #334155' }}>
+                {userData.fotoProfil ? (
+                  <img src={userData.fotoProfil} alt="Foto Profil" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  penghuni.nama ? penghuni.nama.charAt(0).toUpperCase() : 'T'
+                )}
               </div>
+
+              <div style={{ flex: 1 }}>
+                <h3 style={{ fontSize: '15px', color: '#fff', margin: '0 0 4px 0' }}>Foto Profil Akun</h3>
+                <p style={{ fontSize: '12px', color: '#94a3b8', margin: '0 0 12px 0' }}>Unggah foto diri terbaik Anda untuk identitas akun portal.</p>
+                
+                <form action={uploadFotoProfilAction} encType="multipart/form-data" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input type="hidden" name="userId" value={userData.id} />
+                  <input type="file" name="fileFotoProfil" accept="image/*" required style={{ fontSize: '11px', color: '#cbd5e1' }} />
+                  <button type="submit" style={{ backgroundColor: '#1e293b', color: '#38bdf8', border: '1px solid #334155', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', width: 'fit-content' }}>
+                    📷 Perbarui Foto Profil
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* FORM KONTAK (NAMA LENGKAP TERKUNCI / READ-ONLY) */}
+            <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '24px' }}>
+              <h2 style={{ fontSize: '16px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px' }}>📋 Informasi Administratif</h2>
+              
+              <form action={updateKontakAction} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <input type="hidden" name="penghuniId" value={penghuni.id} />
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Nama Lengkap Resmi (Terkunci Sesuai Kontrak)</label>
+                  <input 
+                    type="text" 
+                    value={penghuni.nama} 
+                    disabled 
+                    style={{ width: '100%', boxSizing: 'border-box', backgroundColor: '#04060b', border: '1px solid #1e293b', color: '#64748b', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', cursor: 'not-allowed' }} 
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Perubahan nama lengkap wajib melalui persetujuan operator.</span>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '6px' }}>No. WhatsApp / Telepon Aktif</label>
+                  <input 
+                    type="text" 
+                    name="nomorHp" 
+                    defaultValue={penghuni.nomorHp} 
+                    required 
+                    style={{ width: '100%', boxSizing: 'border-box', backgroundColor: '#090d16', border: '1px solid #334155', color: '#fff', padding: '10px 12px', borderRadius: '8px', fontSize: '13px', outline: 'none' }} 
+                  />
+                </div>
+
+                <div style={{ backgroundColor: '#090d16', border: '1px solid #1e293b', padding: '10px 14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#64748b', fontSize: '12px' }}>Kamar Terdaftar</span>
+                  <span style={{ color: '#4ade80', fontSize: '12px', fontWeight: 'bold' }}>Kamar {penghuni.kamar?.nomorKamar || '-'}</span>
+                </div>
+
+                <button type="submit" style={{ backgroundColor: '#38bdf8', color: '#090d16', border: 'none', padding: '10px 16px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', marginTop: '4px' }}>
+                  💾 Simpan Kontak WhatsApp
+                </button>
+              </form>
             </div>
 
             {/* UPLOAD KTP CARD */}
@@ -120,16 +222,17 @@ export default async function ProfilPenghuniPage() {
                   </a>
                 </div>
               ) : (
-                <form action={uploadKtpAction} style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <form action={uploadKtpAction} encType="multipart/form-data" style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <p style={{ margin: 0, color: '#cbd5e1', fontSize: '13px' }}>Anda belum mengunggah foto KTP. Hal ini wajib untuk administrasi hunian.</p>
                   <input type="hidden" name="penghuniId" value={penghuni.id} />
-                  <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '8px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155' }} />
+                  <input type="file" name="fileKtp" accept="image/*,.pdf" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '8px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155', cursor: 'pointer' }} />
                   <button type="submit" style={{ backgroundColor: '#4ade80', color: '#064e3b', border: 'none', padding: '10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}>
                     ⬆️ Unggah KTP Sekarang
                   </button>
                 </form>
               )}
             </div>
+
           </div>
 
           {/* KOLOM KANAN: WIFI & TATA TERTIB */}

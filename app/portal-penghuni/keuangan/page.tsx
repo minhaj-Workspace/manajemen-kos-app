@@ -2,11 +2,12 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { writeFile } from 'fs/promises'
+import fs from 'fs'
 import path from 'path'
 import { revalidatePath } from 'next/cache'
 
 // ==========================================
-// SERVER ACTIONS (Enum Mutakhir: MENUNGGU_VERIFIKASI)
+// SERVER ACTIONS 
 // ==========================================
 async function uploadBuktiBayarAction(formData: FormData) {
   'use server'
@@ -15,24 +16,35 @@ async function uploadBuktiBayarAction(formData: FormData) {
   
   if (!file || file.size === 0 || !invoiceId) return
 
-  const bytes = await file.arrayBuffer()
-  const buffer = Buffer.from(bytes)
-  const fileName = `bukti-bayar-${invoiceId}-${Date.now()}.${file.name.split('.').pop()}`
-  const filePath = path.join(process.cwd(), 'public/uploads', fileName)
-  
-  await writeFile(filePath, buffer)
-
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { 
-      buktiBayarUrl: `/uploads/${fileName}`, 
-      status: 'MENUNGGU_VERIFIKASI' // Enum Mutakhir
+  try {
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+    const fileName = `bukti-bayar-${invoiceId}-${Date.now()}-${originalName}`
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads')
+    
+    // Memastikan folder direktori /public/uploads tersedia secara otomatis
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true })
     }
-  })
-  
-  revalidatePath('/portal-penghuni/keuangan')
-  revalidatePath('/verifikasi')
-  revalidatePath('/tagihan')
+
+    const filePath = path.join(uploadDir, fileName)
+    await writeFile(filePath, buffer)
+
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { 
+        buktiBayarUrl: `/uploads/${fileName}`, 
+        status: 'MENUNGGU_VERIFIKASI' 
+      }
+    })
+    
+    revalidatePath('/portal-penghuni/keuangan')
+    revalidatePath('/verifikasi')
+    revalidatePath('/tagihan')
+  } catch (error) {
+    console.error('Gagal mengunggah bukti bayar:', error)
+  }
 }
 
 // ==========================================
@@ -43,7 +55,6 @@ export default async function KeuanganPenghuniPage() {
   const userId = cookieStore.get('user_id')?.value
   const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Validasi role dengan Enum 'TENANT'
   if (!userId || userRole !== 'TENANT') redirect('/')
   
   const idUser = parseInt(userId, 10)
@@ -66,7 +77,6 @@ export default async function KeuanganPenghuniPage() {
 
   const daftarInvoice = penghuni.kamar?.invoices || []
   
-  // Pemfilteran status menggunakan Enum 'LUNAS' dan 'MENUNGGU_VERIFIKASI'
   const tagihanAktif = daftarInvoice.filter(inv => inv.status !== 'LUNAS')
   const riwayatLunas = daftarInvoice.filter(inv => inv.status === 'LUNAS')
 
@@ -125,10 +135,10 @@ export default async function KeuanganPenghuniPage() {
                       <span>Bukti transfer telah dikirim dan sedang dalam antrean verifikasi operator.</span>
                     </div>
                   ) : (
-                    <form action={uploadBuktiBayarAction} style={{ backgroundColor: '#090d16', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <form action={uploadBuktiBayarAction} method="POST" encType="multipart/form-data" style={{ backgroundColor: '#090d16', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1', fontWeight: 'bold' }}>Unggah Bukti Transfer Pembayaran:</p>
                       <input type="hidden" name="invoiceId" value={inv.id} />
-                      <input type="file" name="fileBukti" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155' }} />
+                      <input type="file" name="fileBukti" accept="image/*,.pdf" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155', cursor: 'pointer' }} />
                       <button type="submit" style={{ backgroundColor: '#0ea5e9', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start' }}>
                         📤 Kirim Bukti Bayar
                       </button>

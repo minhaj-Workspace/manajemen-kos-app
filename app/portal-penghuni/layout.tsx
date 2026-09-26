@@ -97,6 +97,12 @@ export default function PortalPenghuniLayout({
   namaTenant?: string 
 }) {
   const pathname = usePathname()
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
+
+  // Menutup sidebar otomatis saat berpindah halaman di mobile
+  useEffect(() => {
+    setIsMobileSidebarOpen(false)
+  }, [pathname])
 
   const navItems = [
     { name: 'Dashboard', path: '/portal-penghuni', icon: '⊞' },
@@ -109,18 +115,83 @@ export default function PortalPenghuniLayout({
   const hotlineWa = nomorDarurat || '6280000000000'
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif', position: 'relative', overflowX: 'hidden' }}>
       
-      {/* SIDEBAR KIRI */}
-      <aside style={{ width: '260px', backgroundColor: '#090d16', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
+      {/* CSS RESPONSIF UNTUK TABLET & MOBILE */}
+      <style jsx global>{`
+        @media (max-width: 1024px) {
+          .tenant-sidebar {
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+          }
+          .tenant-sidebar.mobile-open {
+            transform: translateX(0) !important;
+          }
+          .tenant-main-wrapper {
+            margin-left: 0 !important;
+            width: 100% !important;
+          }
+          .tenant-mobile-btn {
+            display: flex !important;
+          }
+        }
+        @media (min-width: 1025px) {
+          .tenant-mobile-btn {
+            display: none !important;
+          }
+          .tenant-menu-overlay {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      {/* OVERLAY GELAP SAAT SIDEBAR MOBILE DIBUKA */}
+      {isMobileSidebarOpen && (
+        <div 
+          className="tenant-menu-overlay"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 40,
+          }}
+        />
+      )}
+
+      {/* SIDEBAR KIRI (RESPONSIF) */}
+      <aside 
+        className={`tenant-sidebar ${isMobileSidebarOpen ? 'mobile-open' : ''}`}
+        style={{ 
+          width: '260px', 
+          backgroundColor: '#090d16', 
+          borderRight: '1px solid #1e293b', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          position: 'fixed', 
+          top: 0, 
+          bottom: 0, 
+          left: 0, 
+          zIndex: 50,
+          transition: 'transform 0.3s ease-in-out'
+        }}
+      >
         
-        <div style={{ height: '70px', display: 'flex', alignItems: 'center', padding: '0 24px', borderBottom: '1px solid #1e293b', flexShrink: 0 }}>
+        <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '1px solid #1e293b', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '18px', color: '#f8fafc' }}>✦</span>
             <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#f8fafc', letterSpacing: '0.5px' }}>
               Kos-App <span style={{ backgroundColor: '#0ea5e9', color: '#090d16', fontSize: '10px', padding: '3px 6px', borderRadius: '4px', verticalAlign: 'middle', fontWeight: 'bold' }}>TENANT</span>
             </span>
           </div>
+          {/* Tombol Close Mobile */}
+          <button 
+            onClick={() => setIsMobileSidebarOpen(false)}
+            style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '18px', cursor: 'pointer' }}
+            className="lg:hidden"
+          >
+            ✕
+          </button>
         </div>
 
         {/* DAFTAR MENU NAVIGASI */}
@@ -170,22 +241,49 @@ export default function PortalPenghuniLayout({
       </aside>
 
       {/* KONTEN UTAMA */}
-      <div style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b' }}>
+      <div 
+        className="tenant-main-wrapper"
+        style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b', width: 'calc(100% - 260px)', boxSizing: 'border-box' }}
+      >
         
-        {/* HEADER / TOPBAR */}
-        <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px', position: 'sticky', top: 0, zIndex: 9 }}>
-          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center', width: '280px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>🔍 Cari informasi fasilitas...</span>
+        {/* HEADER / TOPBAR DENGAN TOMBOL MENU HAMBURGER */}
+        <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 24px', position: 'sticky', top: 0, zIndex: 30, boxSizing: 'border-box' }}>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Tombol Hamburger Mobile */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="tenant-mobile-btn"
+              style={{
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '8px',
+                color: '#fff',
+                padding: '8px 12px',
+                cursor: 'pointer',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                flexShrink: 0
+              }}
+            >
+              <span>☰ Menu</span>
+            </button>
+
+            <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '8px 16px', borderRadius: '8px', display: 'flex', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>🔍 Portal Tenant Kos-App</span>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
             <div style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></div>
             <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '500' }}>Sistem Online</span>
           </div>
         </header>
 
         {/* KONTEN DINAMIS HALAMAN */}
-        <main style={{ flex: 1, padding: '40px', boxSizing: 'border-box' }}>
+        <main style={{ flex: 1, padding: '24px', boxSizing: 'border-box', width: '100%', overflowX: 'hidden' }}>
           {children}
         </main>
       </div>
