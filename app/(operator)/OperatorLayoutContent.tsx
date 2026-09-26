@@ -19,6 +19,7 @@ export default function OperatorLayoutContent({
   const [isSearching, setIsSearching] = useState(false)
   
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false) // State khusus menu mobile/tablet
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Menutup dropdown profil jika pengguna mengklik di luar area
@@ -31,6 +32,11 @@ export default function OperatorLayoutContent({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Menutup sidebar mobile otomatis saat berpindah halaman
+  useEffect(() => {
+    setIsMobileSidebarOpen(false)
+  }, [pathname])
 
   // Fungsi pengatur gaya menu aktif secara dinamis
   const getMenuStyle = (path: string) => {
@@ -66,17 +72,82 @@ export default function OperatorLayoutContent({
   const inisialNama = initialName ? initialName.charAt(0).toUpperCase() : 'M'
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#04060b', color: '#f1f5f9', fontFamily: 'sans-serif', position: 'relative', overflowX: 'hidden' }}>
       
-      {/* SIDEBAR UTAMA */}
-      <aside style={{ width: '260px', backgroundColor: '#090d16', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 10 }}>
-        <div style={{ padding: '28px 24px', borderBottom: '1px solid #1e293b' }}>
+      {/* CSS RESPONSIF UNTUK MEDIA QUERIES (TABLET & MOBILE) */}
+      <style jsx global>{`
+        @media (max-width: 1024px) {
+          .desktop-sidebar {
+            transform: translateX(-100%);
+            transition: transform 0.3s ease-in-out;
+          }
+          .desktop-sidebar.mobile-open {
+            transform: translateX(0) !important;
+          }
+          .main-content-wrapper {
+            margin-left: 0 !important;
+            width: 100% !important;
+          }
+          .mobile-top-bar {
+            display: flex !important;
+          }
+        }
+        @media (min-width: 1025px) {
+          .mobile-top-bar {
+            display: none !important;
+          }
+          .mobile-menu-overlay {
+            display: none !important;
+          }
+        }
+      `}</style>
+
+      {/* OVERLAY GELAP SAAT SIDEBAR MOBILE DIBUKA */}
+      {isMobileSidebarOpen && (
+        <div 
+          className="mobile-menu-overlay"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 40,
+          }}
+        />
+      )}
+
+      {/* SIDEBAR UTAMA (RESPONSIF UNTUK DESKTOP, TABLET, & HP) */}
+      <aside 
+        className={`desktop-sidebar ${isMobileSidebarOpen ? 'mobile-open' : ''}`}
+        style={{ 
+          width: '260px', 
+          backgroundColor: '#090d16', 
+          borderRight: '1px solid #1e293b', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          position: 'fixed', 
+          top: 0, 
+          bottom: 0, 
+          left: 0, 
+          zIndex: 50,
+          transition: 'transform 0.3s ease-in-out'
+        }}
+      >
+        <div style={{ padding: '28px 24px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ fontSize: '18px', fontWeight: 'bold', color: '#fff', margin: 0 }}>
             ✦ Kos-App <span style={{ fontSize: '10px', backgroundColor: '#38bdf8', color: '#090d16', padding: '3px 6px', borderRadius: '4px' }}>PRO</span>
           </h2>
+          {/* Tombol Close khusus tampilan Mobile/Tablet */}
+          <button 
+            onClick={() => setIsMobileSidebarOpen(false)}
+            style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '18px', cursor: 'pointer' }}
+            className="lg:hidden"
+          >
+            ✕
+          </button>
         </div>
 
-        {/* DAFTAR MENU NAVIGASI (PERBAIKAN: Mengarahkan ke /dashboard-operator) */}
+        {/* DAFTAR MENU NAVIGASI */}
         <nav style={{ padding: '24px 16px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, overflowY: 'auto' }}>
           <Link href="/dashboard-operator" style={getMenuStyle('/dashboard-operator')}>⊞ Dashboard</Link>
           <Link href="/penghuni" style={getMenuStyle('/penghuni')}>👥 Kelola Penghuni</Link>
@@ -149,11 +220,11 @@ export default function OperatorLayoutContent({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#0ea5e9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '13px', color: '#090d16' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#0ea5e9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '13px', color: '#090d16', flexShrink: 0 }}>
                 {inisialNama}
               </div>
-              <div style={{ textAlign: 'left' }}>
-                <p style={{ margin: 0, fontSize: '13px', fontWeight: '600' }}>{initialName}</p>
+              <div style={{ textAlign: 'left', overflow: 'hidden' }}>
+                <p style={{ margin: 0, fontSize: '13px', fontWeight: '600', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{initialName}</p>
                 <p style={{ margin: 0, fontSize: '10px', color: '#94a3b8' }}>{initialRole}</p>
               </div>
             </div>
@@ -164,29 +235,56 @@ export default function OperatorLayoutContent({
       </aside>
 
       {/* AREA KONTEN UTAMA */}
-      <div style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b' }}>
+      <div 
+        className="main-content-wrapper"
+        style={{ marginLeft: '260px', flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#04060b', width: 'calc(100% - 260px)', boxSizing: 'border-box' }}
+      >
         
-        <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 40px', position: 'sticky', top: 0, zIndex: 9 }}>
+        {/* HEADER ATAS DENGAN HAMBURGER MENU KHUSUS MOBILE & TABLET */}
+        <header style={{ height: '70px', borderBottom: '1px solid #1e293b', backgroundColor: '#090d16', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', position: 'sticky', top: 0, zIndex: 30, boxSizing: 'border-box' }}>
           
-          <form onSubmit={handleSearchSubmit} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '6px 14px', width: '340px', gap: '10px' }}>
-            <span style={{ color: '#64748b', fontSize: '14px' }}>🔍</span>
-            <input 
-              type="text" 
-              placeholder={isSearching ? "Mencari..." : "Cari data penghuni/kamar (Tekan Enter)..."} 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '13px', outline: 'none', width: '100%' }}
-            />
-            <span style={{ fontSize: '10px', backgroundColor: '#1e293b', color: '#94a3b8', padding: '2px 6px', borderRadius: '4px' }}>↵</span>
-          </form>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, maxWidth: '400px' }}>
+            {/* Tombol Hamburger Menu untuk Tablet & HP */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="mobile-top-bar"
+              style={{
+                background: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: '8px',
+                color: '#fff',
+                padding: '8px 12px',
+                cursor: 'pointer',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                flexShrink: 0
+              }}
+            >
+              <span>☰ Menu</span>
+            </button>
 
-          <div style={{ zIndex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Kolom Pencarian */}
+            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', padding: '6px 12px', width: '100%', gap: '8px', boxSizing: 'border-box' }}>
+              <span style={{ color: '#64748b', fontSize: '14px' }}>🔍</span>
+              <input 
+                type="text" 
+                placeholder={isSearching ? "Mencari..." : "Cari data penghuni..."} 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '13px', outline: 'none', width: '100%' }}
+              />
+            </form>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '10px' }}>
             <div style={{ width: '8px', height: '8px', backgroundColor: '#4ade80', borderRadius: '50%' }}></div>
-            <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '500' }}>{initialRole} Aktif</span>
+            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '500' }}>{initialRole}</span>
           </div>
         </header>
 
-        <main style={{ flex: 1, padding: '40px', boxSizing: 'border-box' }}>
+        <main style={{ flex: 1, padding: '24px', boxSizing: 'border-box', width: '100%', overflowX: 'hidden' }}>
           {children}
         </main>
       </div>
