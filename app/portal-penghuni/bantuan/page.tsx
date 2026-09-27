@@ -2,11 +2,9 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import fs from 'fs'
-import path from 'path'
 
 // ==========================================
-// SERVER ACTION (Dengan Dukungan Unggah File Fisik)
+// SERVER ACTION (Base64 Database Storage & Validasi Maks 2 MB)
 // ==========================================
 async function ajukanTiketAction(formData: FormData) {
   'use server'
@@ -19,25 +17,23 @@ async function ajukanTiketAction(formData: FormData) {
 
   let fotoUrlToSave = null
 
-  // Proses pengunggahan berkas fisik foto kerusakan ke folder public/uploads/maintenance
+  // Proses pengunggahan berkas foto kerusakan via Base64 ke Database (Aman untuk Vercel)
   if (fotoFile && fotoFile.size > 0) {
+    // PENGAMANAN: Batas maksimal ukuran file adalah 2 MB
+    const MAX_SIZE = 2 * 1024 * 1024
+    if (fotoFile.size > MAX_SIZE) {
+      console.error('Gagal: Ukuran foto terlalu besar (Maksimal 2 MB)')
+      return
+    }
+
     try {
       const bytes = await fotoFile.arrayBuffer()
       const buffer = Buffer.from(bytes)
-
-      const originalName = fotoFile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const fileName = `ticket_${Date.now()}_${originalName}`
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'maintenance')
-
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true })
-      }
-
-      const filePath = path.join(uploadDir, fileName)
-      fs.writeFileSync(filePath, buffer)
-      fotoUrlToSave = `/uploads/maintenance/${fileName}`
+      const base64Flag = `data:${fotoFile.type};base64,`
+      const base64String = buffer.toString('base64')
+      fotoUrlToSave = base64Flag + base64String
     } catch (error) {
-      console.error('Gagal mengunggah foto kendala:', error)
+      console.error('Gagal memproses foto kendala:', error)
     }
   }
 
@@ -47,7 +43,7 @@ async function ajukanTiketAction(formData: FormData) {
     data: { 
       kamarId: parseInt(kamarId, 10), 
       deskripsi: deskripsiLengkap, 
-      status: 'PENDING', // Enum Mutakhir (Menyesuaikan Kanban Operator)
+      status: 'PENDING', 
       tanggungJawab: 'Pengelola', 
       ...(fotoUrlToSave ? { fotoUrl: fotoUrlToSave } : {})
     }
@@ -65,7 +61,6 @@ export default async function BantuanPenghuniPage() {
   const userId = cookieStore.get('user_id')?.value
   const userRole = cookieStore.get('user_role')?.value?.trim().toUpperCase()
 
-  // Validasi role dengan Enum 'TENANT'
   if (!userId || userRole !== 'TENANT') redirect('/')
 
   const penghuni = await prisma.penghuni.findUnique({
@@ -83,7 +78,6 @@ export default async function BantuanPenghuniPage() {
     })
   }
 
-  // Helper Warna Status (Mendukung status operasional Kanban)
   const getStatusBadge = (status: string) => {
     switch (status.toUpperCase()) {
       case 'SELESAI':
@@ -119,7 +113,7 @@ export default async function BantuanPenghuniPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px' }}>
         
-        {/* KOLOM KIRI: FORM PENGAJUAN DENGAN UNGGAH BERKAS FISIK */}
+        {/* KOLOM KIRI: FORM PENGAJUAN */}
         <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '24px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', backgroundColor: '#eab308' }}></div>
           <h2 style={{ fontSize: '15px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px', fontWeight: 'bold' }}>
@@ -156,16 +150,16 @@ export default async function BantuanPenghuniPage() {
                 ></textarea>
               </div>
 
-              {/* UNGGAH FOTO FISIK (MENGGANTIKAN URL TEKS) */}
+              {/* UNGGAH FOTO VIA BASE64 DATABASE */}
               <div>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', color: '#38bdf8', fontWeight: 'bold' }}>Unggah Foto Kerusakan (Opsional)</label>
                 <input 
                   type="file" 
                   name="fotoFile" 
-                  accept=".jpg,.jpeg,.png"
+                  accept="image/*"
                   style={{ width: '100%', boxSizing: 'border-box', backgroundColor: '#090d16', border: '1px solid #334155', color: '#cbd5e1', padding: '10px 12px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer' }}
                 />
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>Format foto: JPG, JPEG, atau PNG. Langsung pilih dari galeri HP atau komputer Anda.</span>
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>* Format gambar (JPG/PNG), Maksimal ukuran 2 MB.</span>
               </div>
 
               <button type="submit" style={{ backgroundColor: '#eab308', color: '#000', border: 'none', padding: '12px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', alignSelf: 'flex-start', transition: '0.2s' }}>
@@ -179,7 +173,7 @@ export default async function BantuanPenghuniPage() {
           )}
         </div>
 
-        {/* KOLOM KANAN: RIWAYAT TIKET & PROGRESS LIVE */}
+        {/* KOLOM KANAN: RIWAYAT TIKET */}
         <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '24px' }}>
           <h2 style={{ fontSize: '15px', color: '#fff', margin: '0 0 16px 0', borderBottom: '1px solid #1e293b', paddingBottom: '12px', fontWeight: 'bold' }}>
             📋 Status Pengerjaan Teknisi ({daftarTiket.length})
@@ -204,7 +198,6 @@ export default async function BantuanPenghuniPage() {
 
                     <p style={{ margin: 0, color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5' }}>{t.deskripsi}</p>
 
-                    {/* TAMPILKAN FOTO JIKA ADA */}
                     {t.fotoUrl && (
                       <div>
                         <a href={t.fotoUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '12px', color: '#38bdf8', textDecoration: 'none', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -213,7 +206,6 @@ export default async function BantuanPenghuniPage() {
                       </div>
                     )}
 
-                    {/* METRIK INTEGRASI OPERATOR */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' }}>
                       <span style={{ color: '#94a3b8' }}>
                         Diajukan: {t.createdAt ? new Date(t.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '-'}

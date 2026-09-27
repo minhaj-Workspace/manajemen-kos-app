@@ -2,14 +2,11 @@ import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { writeFile } from 'fs/promises'
-import fs from 'fs'
-import path from 'path'
 import bcrypt from 'bcryptjs'
 import { SubmitSettingBtn, DeleteUserForm } from '@/components/SettingsClientActions'
 
 // ==========================================
-// ENTERPRISE SERVER ACTIONS (SANGAT AMAN)
+// ENTERPRISE SERVER ACTIONS (SANGAT AMAN & VERCEL READY)
 // ==========================================
 async function verifyAdminAccess() {
   const cookieStore = await cookies()
@@ -28,7 +25,7 @@ async function updateSettingAction(formData: FormData) {
   revalidatePath('/settings')
 }
 
-// Server Action untuk Unggah Berkas Fisik Foto Profil Admin/Operator
+// Server Action untuk Unggah Foto Profil Admin/Operator via Base64 (Aman untuk Vercel)
 async function updateProfileAction(formData: FormData) {
   'use server'
   const cookieStore = await cookies()
@@ -37,25 +34,24 @@ async function updateProfileAction(formData: FormData) {
 
   const namaLengkap = formData.get('namaLengkap') as string
   const nomorHp = formData.get('nomorHp') as string
-  const fileFoto = formData.get('fileFotoProfil') as File
+  const fileFoto = formData.get('fileFotoProfil') as File | null
 
   try {
     let fotoProfilUrl: string | undefined = undefined
 
     if (fileFoto && fileFoto.size > 0) {
-      const bytes = await fileFoto.arrayBuffer()
-      const buffer = Buffer.from(bytes)
-      const originalName = fileFoto.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const fileName = `admin-profil-${userId}-${Date.now()}-${originalName}`
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true })
+      // PENGAMANAN: Batas maksimal ukuran file adalah 2 MB
+      const MAX_SIZE = 2 * 1024 * 1024
+      if (fileFoto.size > MAX_SIZE) {
+        console.error('Gagal: Ukuran foto profil terlalu besar (Maksimal 2 MB)')
+        return
       }
 
-      const filePath = path.join(uploadDir, fileName)
-      await writeFile(filePath, buffer)
-      fotoProfilUrl = `/uploads/${fileName}`
+      const bytes = await fileFoto.arrayBuffer()
+      const buffer = Buffer.from(bytes)
+      const base64Flag = `data:${fileFoto.type};base64,`
+      const base64String = buffer.toString('base64')
+      fotoProfilUrl = base64Flag + base64String
     }
 
     const existingUser = await prisma.user.findUnique({ where: { id: userId } })
@@ -330,7 +326,7 @@ export default async function SettingPage() {
         {/* GRID PENGATURAN (Bento Layout) */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           
-          {/* 1. PROFIL PENGGUNA (DIUBAH MENJADI FORM FILE UPLOAD) */}
+          {/* 1. PROFIL PENGGUNA */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 md:p-6 relative overflow-hidden shadow-xl">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
             <h2 className="text-sm font-bold text-white border-b border-slate-800 pb-3 mb-4">👤 Identitas Profil</h2>
@@ -347,6 +343,7 @@ export default async function SettingPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1.5">Unggah Foto Profil Baru</label>
+                  <span className="text-[10px] text-slate-400 block mb-1">* Format gambar (JPG/PNG), Maksimal 2 MB.</span>
                   <input type="file" name="fileFotoProfil" accept="image/*" className="w-full bg-slate-950 border border-slate-800 text-slate-300 p-2 rounded-lg text-xs outline-none cursor-pointer file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500" />
                 </div>
                 <div>
@@ -372,7 +369,7 @@ export default async function SettingPage() {
                 <label className="block text-xs font-bold text-slate-500 mb-1.5">Kata Sandi Baru (Min. 6 Karakter)</label>
                 <input type="password" name="passwordBaru" required placeholder="••••••••" className="w-full bg-slate-950 border border-slate-800 text-white p-2.5 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none" />
               </div>
-              <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white p-2.5 rounded-lg text-sm font-bold mt-auto transition-colors shadow-lg">Perbarui Sandi</button>
+              <button type="submit" className="bg-amber-600 hover:bg-amber-500 text-white p-2.5 rounded-lg text-sm font-bold mt-auto transition-colors shadow-lg cursor-pointer">Perbarui Sandi</button>
             </form>
           </div>
 
@@ -449,7 +446,7 @@ export default async function SettingPage() {
                 <label className="block text-xs font-bold text-slate-500 mb-1.5">Isi Informasi</label>
                 <textarea name="isi" required rows={3} placeholder="Tuliskan isi pengumuman..." className="w-full bg-slate-900 border border-slate-700 text-white p-2.5 rounded-lg text-xs outline-none resize-y"></textarea>
               </div>
-              <button type="submit" className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 p-2.5 rounded-lg text-xs font-bold shadow-lg transition-colors mt-2">🚀 Publikasikan Pengumuman</button>
+              <button type="submit" className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 p-2.5 rounded-lg text-xs font-bold shadow-lg transition-colors mt-2 cursor-pointer">🚀 Publikasikan Pengumuman</button>
             </form>
 
             <div className="flex flex-col gap-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
@@ -467,7 +464,7 @@ export default async function SettingPage() {
                     <p className="text-xs text-slate-400 m-0 leading-relaxed line-clamp-2">{item.isi}</p>
                     <form action={hapusPengumumanAction} className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity m-0">
                       <input type="hidden" name="pengumumanId" value={item.id} />
-                      <button type="submit" className="text-[10px] bg-red-900/30 hover:bg-red-900/50 text-red-400 px-2 py-1 rounded font-bold">Hapus</button>
+                      <button type="submit" className="text-[10px] bg-red-900/30 hover:bg-red-900/50 text-red-400 px-2 py-1 rounded font-bold cursor-pointer">Hapus</button>
                     </form>
                   </div>
                 ))
@@ -521,7 +518,7 @@ export default async function SettingPage() {
                               <form action={requestRoleChangeAction} className="m-0">
                                 <input type="hidden" name="userId" value={u.id} />
                                 <input type="hidden" name="targetRole" value={targetRole} />
-                                <button type="submit" className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border ${
+                                <button type="submit" className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
                                   isPrivileged ? 'bg-transparent text-amber-500 border-amber-900/50 hover:bg-amber-900/20' : 'bg-transparent text-sky-400 border-sky-900/50 hover:bg-sky-900/20'
                                 }`}>
                                   Jadikan {targetRole}

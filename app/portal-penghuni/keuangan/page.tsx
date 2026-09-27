@@ -1,13 +1,10 @@
 import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { writeFile } from 'fs/promises'
-import fs from 'fs'
-import path from 'path'
 import { revalidatePath } from 'next/cache'
 
 // ==========================================
-// SERVER ACTIONS 
+// SERVER ACTIONS (Base64 Database Storage & Validasi Maks 2 MB)
 // ==========================================
 async function uploadBuktiBayarAction(formData: FormData) {
   'use server'
@@ -16,25 +13,24 @@ async function uploadBuktiBayarAction(formData: FormData) {
   
   if (!file || file.size === 0 || !invoiceId) return
 
+  // PENGAMANAN: Batas maksimal ukuran file adalah 2 MB (2 * 1024 * 1024 bytes)
+  const MAX_SIZE = 2 * 1024 * 1024
+  if (file.size > MAX_SIZE) {
+    console.error('Gagal: Ukuran file terlalu besar (Maksimal 2 MB)')
+    return
+  }
+
   try {
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
-    const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-    const fileName = `bukti-bayar-${invoiceId}-${Date.now()}-${originalName}`
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads')
-    
-    // Memastikan folder direktori /public/uploads tersedia secara otomatis
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true })
-    }
-
-    const filePath = path.join(uploadDir, fileName)
-    await writeFile(filePath, buffer)
+    const base64Flag = `data:${file.type};base64,`
+    const base64String = buffer.toString('base64')
+    const fileDataUrl = base64Flag + base64String
 
     await prisma.invoice.update({
       where: { id: invoiceId },
       data: { 
-        buktiBayarUrl: `/uploads/${fileName}`, 
+        buktiBayarUrl: fileDataUrl, 
         status: 'MENUNGGU_VERIFIKASI' 
       }
     })
@@ -130,15 +126,23 @@ export default async function KeuanganPenghuniPage() {
                   </div>
                   
                   {isMenungguVerifikasi ? (
-                    <div style={{ backgroundColor: '#090d16', padding: '12px', borderRadius: '8px', color: '#facc15', fontSize: '12px', border: '1px solid #334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>⏳</span>
-                      <span>Bukti transfer telah dikirim dan sedang dalam antrean verifikasi operator.</span>
+                    <div style={{ backgroundColor: '#090d16', padding: '12px', borderRadius: '8px', color: '#facc15', fontSize: '12px', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>⏳</span>
+                        <span>Bukti transfer telah dikirim dan sedang dalam antrean verifikasi operator.</span>
+                      </div>
+                      {inv.buktiBayarUrl && (
+                        <a href={inv.buktiBayarUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#38bdf8', fontSize: '11px', textDecoration: 'underline', fontWeight: 'bold' }}>
+                          🔍 Lihat Bukti Terunggah
+                        </a>
+                      )}
                     </div>
                   ) : (
                     <form action={uploadBuktiBayarAction} method="POST" encType="multipart/form-data" style={{ backgroundColor: '#090d16', padding: '14px', borderRadius: '8px', border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1', fontWeight: 'bold' }}>Unggah Bukti Transfer Pembayaran:</p>
+                      <span style={{ fontSize: '10px', color: '#94a3b8' }}>* Format gambar (JPG/PNG), Maksimal ukuran 2 MB.</span>
                       <input type="hidden" name="invoiceId" value={inv.id} />
-                      <input type="file" name="fileBukti" accept="image/*,.pdf" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155', cursor: 'pointer' }} />
+                      <input type="file" name="fileBukti" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155', cursor: 'pointer' }} />
                       <button type="submit" style={{ backgroundColor: '#0ea5e9', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start' }}>
                         📤 Kirim Bukti Bayar
                       </button>

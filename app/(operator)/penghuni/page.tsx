@@ -3,12 +3,10 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
-import fs from 'fs'
-import path from 'path'
 import { SubmitPenghuniBtn, CheckoutForm } from '@/components/PenghuniClientActions'
 
 // ==========================================
-// SERVER ACTIONS (Aman & Logika Mutakhir)
+// SERVER ACTIONS (Base64 Database Storage & Validasi Maks 2 MB)
 // ==========================================
 async function tambahPenghuniAction(formData: FormData) {
   'use server'
@@ -39,25 +37,21 @@ async function tambahPenghuniAction(formData: FormData) {
     const kamar = await prisma.kamar.findUnique({ where: { id: kamarId } })
     if (!kamar) return
 
-    // 2. Proses Pengunggahan Berkas KTP ke Server (jika ada)
+    // 2. Proses Konversi Berkas KTP ke Base64 (Aman untuk Vercel Cloud Server)
     let ktpUrlToSave = null
     if (ktpfile && ktpfile.size > 0) {
-      const bytes = await ktpfile.arrayBuffer()
-      const buffer = Buffer.from(bytes)
-
-      // Buat nama file unik berdasarkan timestamp
-      const originalName = ktpfile.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const fileName = `ktp_${Date.now()}_${originalName}`
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'ktp')
-
-      // Pastikan folder direktori upload tersedia
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true })
+      // PENGAMANAN: Batas maksimal ukuran file adalah 2 MB
+      const MAX_SIZE = 2 * 1024 * 1024
+      if (ktpfile.size > MAX_SIZE) {
+        console.error('Gagal: Ukuran file KTP terlalu besar (Maksimal 2 MB)')
+        return
       }
 
-      const filePath = path.join(uploadDir, fileName)
-      fs.writeFileSync(filePath, buffer)
-      ktpUrlToSave = `/uploads/ktp/${fileName}`
+      const bytes = await ktpfile.arrayBuffer()
+      const buffer = Buffer.from(bytes)
+      const base64Flag = `data:${ktpfile.type};base64,`
+      const base64String = buffer.toString('base64')
+      ktpUrlToSave = base64Flag + base64String
     }
 
     await prisma.$transaction(async (tx) => {
@@ -75,7 +69,7 @@ async function tambahPenghuniAction(formData: FormData) {
         }
       }
 
-      // Buat data penghuni beserta path KTP
+      // Buat data penghuni beserta data Base64 KTP
       const newPenghuni = await tx.penghuni.create({
         data: {
           nama,
@@ -84,7 +78,7 @@ async function tambahPenghuniAction(formData: FormData) {
           userId: userIdToLink,
           kamarId: kamarId,
           isAkunUtama: isAkunUtama,
-          ktpUrl: ktpUrlToSave // Menyimpan jalur file scan KTP
+          ktpUrl: ktpUrlToSave 
         } as any
       })
 
@@ -182,7 +176,6 @@ export default async function KelolaPenghuniPage() {
 
   if (userRole !== 'operator' && userRole !== 'owner') redirect('/')
 
-  // Ambil SEMUA kamar (baik Tersedia maupun Terisi, agar anggota tambahan bisa dimasukkan ke kamar yang sudah terisi)
   const semuaKamar = await prisma.kamar.findMany({
     orderBy: { nomorKamar: 'asc' }
   })
@@ -244,8 +237,9 @@ export default async function KelolaPenghuniPage() {
 
             {/* UPLOAD BERKAS KTP */}
             <div>
-              <label className="block text-xs font-bold text-sky-400 mb-1.5">Scan / Foto KTP (PDF/JPG/PNG)</label>
-              <input type="file" name="ktpfile" accept=".jpg,.jpeg,.png,.pdf" className="w-full bg-slate-950 border border-slate-700 text-slate-300 p-2.5 rounded-lg text-xs file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-sky-950 file:text-sky-400 hover:file:bg-sky-900 cursor-pointer" />
+              <label className="block text-xs font-bold text-sky-400 mb-1.5">Scan / Foto KTP (JPG/PNG)</label>
+              <span className="text-[10px] text-slate-400 block mb-1">* Maksimal ukuran file 2 MB.</span>
+              <input type="file" name="ktpfile" accept="image/*" className="w-full bg-slate-950 border border-slate-700 text-slate-300 p-2.5 rounded-lg text-xs file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-sky-950 file:text-sky-400 hover:file:bg-sky-900 cursor-pointer" />
               <span className="text-[10px] text-slate-500 mt-1 block">Arsip identitas resmi untuk keamanan data properti.</span>
             </div>
 
@@ -305,7 +299,7 @@ export default async function KelolaPenghuniPage() {
               const nomorKamarInfo = p.kamar?.nomorKamar ? `Kamar ${p.kamar.nomorKamar}` : 'Kamar Kos'
               
               const defaultWaMessage = encodeURIComponent(
-                `Halo Kak *${p.nama}* 👋\n\nSelamat datang di hunian kami! Data Anda untuk *${nomorKamarInfo}* telah tercatat dalam sistem.\n\nAkses portal kos melalui link:\n🔗 http://localhost:3000\n\n*Kredensial Login:* ${p.user ? `\n📧 Email: ${tenantEmail}\n🔑 Password: (Sesuai yang diberikan)` : '\n(Anda terdaftar sebagai penghuni pendamping kamar)'}`
+                `Halo Kak *${p.nama}* 👋\n\nSelamat datang di hunian kami! Data Anda untuk *${nomorKamarInfo}* telah tercatat dalam sistem.\n\nAkses portal kos melalui link:\n🔗 Website Anda\n\n*Kredensial Login:* ${p.user ? `\n📧 Email: ${tenantEmail}\n🔑 Password: (Sesuai yang diberikan)` : '\n(Anda terdaftar sebagai penghuni pendamping kamar)'}`
               )
               const waLink = `https://wa.me/${waNumber}?text=${defaultWaMessage}`
 

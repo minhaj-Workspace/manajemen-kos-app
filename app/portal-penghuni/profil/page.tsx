@@ -1,50 +1,56 @@
 import { prisma } from '@/lib/prisma'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { writeFile } from 'fs/promises'
-import path from 'path'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 
 // ==========================================
-// SERVER ACTIONS
+// SERVER ACTIONS (Base64 Database Storage & Validasi Maks 2 MB)
 // ==========================================
 
-// 1. Action untuk Mengajukan/Mengunggah KTP (Mandiri oleh Tenant)
+// 1. Action untuk Mengajukan/Mengunggah KTP (Mandiri oleh Tenant via Base64)
 async function ajukanPembaruanKtpAction(formData: FormData) {
   'use server'
   const file = formData.get('fileKtp') as File
   const penghuniId = parseInt(formData.get('penghuniId') as string, 10)
+  
   if (!file || file.size === 0 || !penghuniId) return
-  
-  const bytes = await file.arrayBuffer()
-  const buffer = Buffer.from(bytes)
-  const fileName = `ktp-req-${penghuniId}-${Date.now()}.${file.name.split('.').pop()}`
-  
-  // Pastikan direktori public/uploads tersedia
-  const uploadDir = path.join(process.cwd(), 'public/uploads')
-  await writeFile(path.join(uploadDir, fileName), buffer)
-  
-  const filePath = `/uploads/${fileName}`
 
-  // Cek apakah penghuni sudah memiliki KTP sebelumnya
-  const penghuni = await prisma.penghuni.findUnique({ where: { id: penghuniId } })
+  // PENGAMANAN: Batas maksimal ukuran file adalah 2 MB
+  const MAX_SIZE = 2 * 1024 * 1024
+  if (file.size > MAX_SIZE) {
+    console.error('Gagal: Ukuran file KTP terlalu besar (Maksimal 2 MB)')
+    return
+  }
 
-  if (!penghuni?.fotoKtp) {
-    // Jika KTP benar-benar kosong (Pendaftaran Mandiri), langsung setel sebagai KTP utama
-    await prisma.penghuni.update({
-      where: { id: penghuniId },
-      data: { fotoKtp: filePath }
-    })
-  } else {
-    // Jika sudah ada, masukkan ke tabel persetujuan berkas (Approval System)
-    await prisma.persetujuanBerkas.create({
-      data: {
-        penghuniId: penghuniId,
-        fotoKtpBaru: filePath,
-        status: 'PENDING'
-      }
-    })
+  try {
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
+    const base64Flag = `data:${file.type};base64,`
+    const base64String = buffer.toString('base64')
+    const fileDataUrl = base64Flag + base64String
+
+    // Cek apakah penghuni sudah memiliki KTP sebelumnya
+    const penghuni = await prisma.penghuni.findUnique({ where: { id: penghuniId } })
+
+    if (!penghuni?.fotoKtp) {
+      // Jika KTP benar-benar kosong, langsung setel sebagai KTP utama
+      await prisma.penghuni.update({
+        where: { id: penghuniId },
+        data: { fotoKtp: fileDataUrl }
+      })
+    } else {
+      // Jika sudah ada, masukkan ke tabel persetujuan berkas (Approval System)
+      await prisma.persetujuanBerkas.create({
+        data: {
+          penghuniId: penghuniId,
+          fotoKtpBaru: fileDataUrl,
+          status: 'PENDING'
+        }
+      })
+    }
+  } catch (error) {
+    console.error('Gagal memproses file KTP:', error)
   }
   
   revalidatePath('/portal-penghuni/profil')
@@ -264,30 +270,32 @@ export default async function ProfilPenghuniPage() {
                 <div style={{ backgroundColor: '#090d16', border: '1px solid rgba(74, 222, 128, 0.3)', padding: '14px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <p style={{ margin: '0 0 2px 0', color: '#4ade80', fontSize: '13px', fontWeight: 'bold' }}>✅ Berkas Terverifikasi</p>
-                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Scan KTP Anda sudah tersimpan di arsip[cite: 10].</p>
+                    <p style={{ margin: 0, color: '#94a3b8', fontSize: '12px' }}>Scan KTP Anda sudah tersimpan di arsip.</p>
                   </div>
-                  <a href={penghuni.fotoKtp} target="_blank" rel="noopener noreferrer" style={{ backgroundColor: '#166534', color: '#fff', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none' }}>Lihat KTP[cite: 10]</a>
+                  <a href={penghuni.fotoKtp} target="_blank" rel="noopener noreferrer" style={{ backgroundColor: '#166534', color: '#fff', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', textDecoration: 'none' }}>Lihat KTP</a>
                 </div>
 
                 {pengajuanAktif ? (
                   <div style={{ backgroundColor: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', padding: '12px', borderRadius: '8px' }}>
-                    <p style={{ margin: 0, color: '#facc15', fontSize: '12px', fontWeight: 'bold' }}>⏳ Pengajuan Perubahan KTP Sedang Ditinjau[cite: 10]</p>
-                    <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '11px' }}>Berkas baru Anda sedang menunggu persetujuan dari pengelola/owner kos[cite: 10].</p>
+                    <p style={{ margin: 0, color: '#facc15', fontSize: '12px', fontWeight: 'bold' }}>⏳ Pengajuan Perubahan KTP Sedang Ditinjau</p>
+                    <p style={{ margin: '4px 0 0 0', color: '#94a3b8', fontSize: '11px' }}>Berkas baru Anda sedang menunggu persetujuan dari pengelola/owner kos.</p>
                   </div>
                 ) : (
-                  <form action={ajukanPembaruanKtpAction} style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '14px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <form action={ajukanPembaruanKtpAction} encType="multipart/form-data" style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '14px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <input type="hidden" name="penghuniId" value={penghuni.id} />
-                    <p style={{ margin: 0, fontSize: '11px', color: '#cbd5e1' }}>Ingin memperbarui data KTP? Ajukan file baru ke pengelola[cite: 10]:</p>
-                    <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '11px', border: '1px solid #334155' }} />
-                    <button type="submit" style={{ backgroundColor: '#38bdf8', color: '#090d16', border: 'none', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', alignSelf: 'flex-start' }}>Ajukan Pembaruan KTP[cite: 10]</button>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#cbd5e1' }}>Ingin memperbarui data KTP? Ajukan file baru ke pengelola:</p>
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>* Format gambar (JPG/PNG), Maksimal ukuran 2 MB.</span>
+                    <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '6px', borderRadius: '6px', fontSize: '11px', border: '1px solid #334155', cursor: 'pointer' }} />
+                    <button type="submit" style={{ backgroundColor: '#38bdf8', color: '#090d16', border: 'none', padding: '6px 12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px', alignSelf: 'flex-start' }}>Ajukan Pembaruan KTP</button>
                   </form>
                 )}
               </div>
             ) : (
-              <form action={ajukanPembaruanKtpAction} style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <form action={ajukanPembaruanKtpAction} encType="multipart/form-data" style={{ backgroundColor: '#090d16', border: '1px dashed #334155', padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <input type="hidden" name="penghuniId" value={penghuni.id} />
                 <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>Unggah foto/scan KTP Anda untuk keperluan validasi hukum sewa:</p>
-                <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '8px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155' }} />
+                <span style={{ fontSize: '10px', color: '#94a3b8' }}>* Format gambar (JPG/PNG), Maksimal ukuran 2 MB.</span>
+                <input type="file" name="fileKtp" accept="image/*" required style={{ backgroundColor: '#1e293b', color: '#fff', padding: '8px', borderRadius: '6px', fontSize: '12px', border: '1px solid #334155', cursor: 'pointer' }} />
                 <button type="submit" style={{ backgroundColor: '#4ade80', color: '#090d16', border: 'none', padding: '8px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px', alignSelf: 'flex-start' }}>Unggah KTP Sekarang</button>
               </form>
             )}
